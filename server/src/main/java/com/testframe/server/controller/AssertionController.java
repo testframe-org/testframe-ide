@@ -1,8 +1,8 @@
 package com.testframe.server.controller;
 
-import com.testframe.jsonata.AssertionResult;
-import com.testframe.jsonata.JsonataAssertionService;
-import com.testframe.jsonata.JsonataException;
+import io.github.jsonassert.AssertionResult;
+import io.github.jsonassert.JsonataAssertionService;
+import io.github.jsonassert.JsonataException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;

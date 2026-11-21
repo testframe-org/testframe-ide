@@ -36,7 +36,7 @@ bun run build                  # client dist + server jar
 bun run test                   # server suite + client build
 ```
 
-The server build needs the `testframe-assert-java` library installed into the
+The server build needs the `jsonassert-java` (`io.github.jsonassert`) library installed into the
 local Maven repo; `scripts/dev*.ts` do it automatically.
 
 See `AGENTS.md` for rules, and `client/README.md` / `server/README.md` /

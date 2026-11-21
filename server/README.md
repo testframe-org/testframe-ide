@@ -10,7 +10,7 @@ here (example APIs belong in `../../examples/*/examples-components/`).
 |---|---|
 | `GET  /api/v2/health` | service status |
 | `POST /api/v2/echo` | generic request target for flows under test (201 + request_id) |
-| `POST /api/v2/assertions` | evaluates the assertion mini-language (engine: `testframe-assert-java`) |
+| `POST /api/v2/assertions` | evaluates the assertion mini-language (engine: `jsonassert-java` (`io.github.jsonassert`)) |
 | `POST /api/v2/frames` / `GET /api/v2/frames/{project}` | persist/read frame `.md` files |
 | `POST /api/v2/sources` / `GET /api/v2/sources/{project}` | persist/read sources + `scripts/{name}.md` |
 
@@ -30,8 +30,8 @@ SERVER_PORT=18080 ./mvnw -q spring-boot:run \
   -Dspring-boot.run.arguments=--app.projects-dir=../../../examples
 ```
 
-Requires the `testframe-assert-java` artifact installed in the local Maven repo
-(`cd ../../testframe-assert-java && bun run install:local`).
+Requires the `jsonassert-java` (`io.github.jsonassert`) artifact installed in the local Maven repo
+(`cd ../../jsonassert && bun run install:java`).
 
 ## Commands
 

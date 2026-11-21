@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: server (Spring Boot)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout jsonassert engine
+        uses: actions/checkout@v4
+        with:
+          repository: jsonassert/jsonassert-lang
+          path: .deps/jsonassert
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Install jsonassert-java into the local Maven repo
+        working-directory: .deps/jsonassert/modules/jsonassert-java
+        run: ./mvnw -B -q install -DskipTests
+      - name: Test
+        working-directory: server
+        run: ./mvnw -B -q verify
+
+  client:
+    name: client (React/TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        working-directory: client
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        working-directory: client
+        run: bun run typecheck
+      - name: Build
+        working-directory: client
+        run: bun run build
+
+  scripts:
+    name: module scripts (typecheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx tsc --noEmit -p .
+
+  product-api:
+    name: example product-api (Spring Boot + Mongo)
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8
+        ports: ['27017:27017']
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Test
+        working-directory: examples/product-test/examples-components/product-api
+        run: ./mvnw -B -q verify
+
+  product-web:
+    name: example product-web (Vite React TS)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        working-directory: examples/product-test/examples-components/product-web
+        run: bun install --frozen-lockfile
+      - name: Typecheck + build
+        working-directory: examples/product-test/examples-components/product-web
+        run: bun run build

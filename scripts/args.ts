@@ -17,7 +17,7 @@ export function parseFlags(argv: string[]): Flags {
   const require = (key: string): string => {
     const value = values[key];
     if (value === undefined) {
-      console.error(`falta parâmetro obrigatório --${key}`);
+      console.error(`missing required parameter --${key}`);
       process.exit(1);
     }
     return value;
@@ -29,7 +29,7 @@ export function parseFlags(argv: string[]): Flags {
       const raw = require(key);
       const n = Number(raw);
       if (!Number.isInteger(n)) {
-        console.error(`--${key} deve ser um número, veio: ${raw}`);
+        console.error(`--${key} must be a number, got: ${raw}`);
         process.exit(1);
       }
       return n;

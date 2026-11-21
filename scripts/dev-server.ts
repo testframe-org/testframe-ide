@@ -14,12 +14,12 @@ const repoRoot = resolve(moduleRoot, '../..');
 
 // The server build needs the assertion engine library installed
 const engine = Bun.spawn(['./mvnw', '-q', 'install', '-DskipTests'], {
-  cwd: resolve(repoRoot, 'modules/testframe-assert-java'),
+  cwd: resolve(repoRoot, 'modules/jsonassert/modules/jsonassert-java'),
   stdout: 'inherit',
   stderr: 'inherit'
 });
 if ((await engine.exited) !== 0) {
-  console.error('testframe-assert-java não compilou');
+  console.error('jsonassert-java failed to build');
   process.exit(1);
 }
 
