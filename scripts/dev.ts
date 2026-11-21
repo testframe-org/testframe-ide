@@ -31,12 +31,12 @@ console.log(`sources  -> ${target}/testframe/sources\n`);
 
 // Build/install the assertion engine library consumed by the server module
 const engine = Bun.spawn(['./mvnw', '-q', 'install', '-DskipTests'], {
-  cwd: resolve(root, 'modules/testframe-jsonata-java'),
+  cwd: resolve(root, 'modules/testframe-assert-java'),
   stdout: 'inherit',
   stderr: 'inherit'
 });
 if ((await engine.exited) !== 0) {
-  console.error('testframe-jsonata-java não compilou');
+  console.error('testframe-assert-java não compilou');
   process.exit(1);
 }
 
