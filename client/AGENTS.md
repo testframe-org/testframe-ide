@@ -45,8 +45,12 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
 - Card files are `frames/{frame}/step-{n}/{var-file}.md` (var-name camelCase, kebab on disk,
   unique per frame). The header edits the frame name; cards bound to a source `script` keep
   an empty body on disk while they match it. Default var-names are English identifiers.
-- Project name defaults to `VITE_PROJECT` (fallback `product-test`); the storage directory
-  is always `slug(projectName)`. The app starts empty and auto-loads saved frames/sources.
+- The project comes from the URL (`?project=name`, see `main.tsx`); without it the start screen
+  (`ProjectPicker`) lists recent projects (localStorage) and every project from `GET /api/v2/projects`,
+  and can create a new one. The header's project icon goes back to it. The storage directory is
+  always `slug(projectName)`; the app auto-loads saved frames/sources.
+- `mongo` cards run live through `POST /api/v2/run/mongo` (the server reads the connection from the
+  saved source file); request and assert cards also run live; other source types are simulated.
 - The top tabs switch between Frames (canvas) and Sources (registry). There is no side inspector:
   cards are edited in `CardEditModal`; double-click on a card body still edits its code inline.
 - Keep the Figma look (ring per status, floating console).

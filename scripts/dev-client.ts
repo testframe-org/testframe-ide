@@ -19,7 +19,7 @@ const proc = Bun.spawn(['bun', 'run', 'dev'], {
   stdout: 'inherit',
   stderr: 'inherit'
 });
-console.log(`client : http://localhost:${clientPort} (projeto ${project}, server :${serverPort})`);
+console.log(`client : http://localhost:${clientPort}/?project=${encodeURIComponent(project)} (server :${serverPort})`);
 
 const stop = () => {
   proc.kill();

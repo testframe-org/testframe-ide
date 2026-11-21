@@ -40,7 +40,7 @@ if (mode !== '--web-only' && existsSync(apiDir)) {
   procs.push(
     Bun.spawn(['./mvnw', '-q', 'spring-boot:run'], {
       cwd: apiDir,
-      env: { ...process.env, SERVER_PORT: String(cfg.serverPort), SPRING_DATA_MONGODB_URI: cfg.mongoUri },
+      env: { ...process.env, SERVER_PORT: String(cfg.serverPort), SPRING_MONGODB_URI: cfg.mongoUri },
       stdout: 'inherit',
       stderr: 'inherit'
     })

@@ -98,4 +98,23 @@ class ProjectFileStoreTest {
         assertFalse(Files.exists(sources.resolve("mongo/db.private.md")));
         assertFalse(Files.exists(sources.resolve("mongo/db")), "scripts directory pruned when empty");
     }
+
+    @Test
+    void listsProjectsWithCounts() throws Exception {
+        ProjectFileStore store = new ProjectFileStore(root.toString());
+        store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
+                new FrameFile("main/step-1/a-card.md", "a")));
+        store.replace("demo", "testframe/sources", List.of("mongo/db"), List.of(), List.of(
+                new FrameFile("mongo/db.md", "pub"),
+                new FrameFile("mongo/db.private.md", "priv"),
+                new FrameFile("mongo/db/get-all.md", "q")));
+        Files.createDirectories(root.resolve("not-a-project"));
+
+        List<ProjectFileStore.ProjectSummary> projects = store.listProjects();
+
+        assertEquals(1, projects.size());
+        assertEquals("demo", projects.getFirst().name());
+        assertEquals(1, projects.getFirst().frames());
+        assertEquals(1, projects.getFirst().sources());
+    }
 }

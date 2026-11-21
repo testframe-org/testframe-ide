@@ -151,6 +151,72 @@ public class ProjectFileStore {
         return Map.of("project", project, "root", dir.toString(), "files", files);
     }
 
+    /** A project folder: {projects-dir}/{name}/testframe/{frames,sources}. */
+    public record ProjectSummary(String name, int frames, int sources, String lastModified) {
+    }
+
+    /** Every directory under the projects dir that holds a testframe/ folder, most recent first. */
+    public List<ProjectSummary> listProjects() throws IOException {
+        if (!Files.isDirectory(root)) {
+            return List.of();
+        }
+        List<ProjectSummary> projects = new ArrayList<>();
+        try (Stream<Path> dirs = Files.list(root)) {
+            for (Path dir : dirs.filter(Files::isDirectory).toList()) {
+                Path testframe = dir.resolve("testframe");
+                if (!Files.isDirectory(testframe)) {
+                    continue;
+                }
+                int frames = countDirs(testframe.resolve("frames"));
+                int sources = countMd(testframe.resolve("sources"));
+                java.nio.file.attribute.FileTime latest = Files.getLastModifiedTime(testframe);
+                try (Stream<Path> walk = Files.walk(testframe)) {
+                    for (Path p : walk.toList()) {
+                        java.nio.file.attribute.FileTime t = Files.getLastModifiedTime(p);
+                        if (t.compareTo(latest) > 0) {
+                            latest = t;
+                        }
+                    }
+                }
+                projects.add(new ProjectSummary(dir.getFileName().toString(), frames, sources, latest.toInstant().toString()));
+            }
+        }
+        projects.sort(Comparator.comparing(ProjectSummary::lastModified).reversed());
+        return projects;
+    }
+
+    private static int countDirs(Path dir) throws IOException {
+        if (!Files.isDirectory(dir)) {
+            return 0;
+        }
+        try (Stream<Path> list = Files.list(dir)) {
+            return (int) list.filter(Files::isDirectory).count();
+        }
+    }
+
+    /** Sources are the {type}/{name}.md files (not private files nor scripts). */
+    private static int countMd(Path sources) throws IOException {
+        if (!Files.isDirectory(sources)) {
+            return 0;
+        }
+        try (Stream<Path> walk = Files.walk(sources, 2)) {
+            return (int) walk.filter(Files::isRegularFile)
+                    .filter(p -> sources.relativize(p).getNameCount() == 2)
+                    .map(p -> p.getFileName().toString())
+                    .filter(n -> n.endsWith(".md") && !n.contains(".private."))
+                    .count();
+        }
+    }
+
+    /** Reads one .md file of a project (path validated like every other access), if it exists. */
+    public java.util.Optional<String> read(String project, String subDir, String relativePath) throws IOException {
+        Path file = resolve(relativePath, resolve(project).resolve(subDir));
+        if (!file.getFileName().toString().endsWith(".md") || !Files.isRegularFile(file)) {
+            return java.util.Optional.empty();
+        }
+        return java.util.Optional.of(Files.readString(file, StandardCharsets.UTF_8));
+    }
+
     private Path resolve(String relative) {
         return resolve(relative, root);
     }

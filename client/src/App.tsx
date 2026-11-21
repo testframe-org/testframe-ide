@@ -30,6 +30,7 @@ import {
 } from './frames';
 import { runTargetRequest, testframeApi } from './client-api';
 import { useI18n } from './i18n';
+import { setProjectInUrl, touchRecentProject } from './recent-projects';
 import { ExecutionConsole } from './components/ExecutionConsole';
 import { CardEditModal } from './components/CardEditModal';
 import { SourcesView } from './components/SourcesView';
@@ -51,12 +52,17 @@ import type {
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
-export default function App() {
+interface AppProps {
+  project: string; // from the URL (?project=)
+  onSwitchProject: () => void; // back to the project list
+}
+
+export default function App({ project, onSwitchProject }: AppProps) {
   const { t, lang, setLang } = useI18n();
 
   // Project state. Steps start empty and are loaded from the project .md files
   const [projectName, setProjectName] = useState<string>(
-    import.meta.env.VITE_PROJECT ?? 'product-test'
+    project
   );
   // The canvas shows one frame (flow): frames/{frameName}/step-{n}/{var-file}.md
   const [frameName, setFrameName] = useState<string>(DEFAULT_FRAME);
@@ -100,6 +106,7 @@ export default function App() {
   );
 
   useEffect(() => {
+    touchRecentProject(slug(project));
     const bootstrap = async () => {
       try {
         const health = await testframeApi.health();
@@ -458,6 +465,8 @@ export default function App() {
       card.code.toLowerCase().includes('expect(false).tobe(true)');
 
     let http: HttpResult | null = null;
+    // Live source-script run (mongo): value published as the card's variable
+    let live: { ok: boolean; summary: string; value: unknown; ms: number } | null = null;
     let assertion: { passed?: boolean; actual?: unknown; expected?: unknown; operator?: string } | null = null;
     if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
       // Live assertion against the framework engine (source type: assert)
@@ -501,6 +510,26 @@ export default function App() {
       } else {
         await new Promise<void>((r) => setTimeout(r, 420));
       }
+    } else if (card.sourceType === 'mongo') {
+      // Live mongo query through the framework server; the connection comes from the
+      // project's saved source file (sources/mongo/{name}.md base-url)
+      const started = performance.now();
+      const script = String(substituteTemplates(card.code, vars));
+      if (!card.sourceName) {
+        live = { ok: false, summary: t('mongoNoBaseUrl', { name: '?' }), value: null, ms: 0 };
+      } else {
+        try {
+          const res = await testframeApi.runMongo(slug(projectName), card.sourceName, script, card.timeout);
+          live = {
+            ok: true,
+            summary: `${res.collection}.${res.operation} → ${res.count}`,
+            value: res.result,
+            ms: Math.round(performance.now() - started)
+          };
+        } catch (err) {
+          live = { ok: false, summary: (err as Error).message, value: null, ms: Math.round(performance.now() - started) };
+        }
+      }
     } else {
       await new Promise<void>((r) => setTimeout(r, 420));
     }
@@ -512,6 +541,18 @@ export default function App() {
       nextStatus = assertion.passed && !shouldFail ? 'success' : 'error';
       logText = `${stepLabel} ${card.title}: assert ${assertion.passed ? t('logOk') : t('logAssertFail')} (${JSON.stringify(assertion.actual)} ${assertion.operator ?? ''} ${JSON.stringify(assertion.expected)})`;
       vars[varKey(card)] = assertion;
+    } else if (live) {
+      nextStatus = live.ok && !shouldFail ? 'success' : 'error';
+      logText = `${stepLabel} ${card.title}: mongo ${live.summary} (${live.ms}ms)`;
+      if (live.ok) {
+        vars[varKey(card)] = live.value;
+        // Feed the step's JSON result card with the real query result
+        const jsonCard = step.postCards.find((c) => c.type === 'json');
+        if (jsonCard) {
+          updateCard(jsonCard.id, { code: JSON.stringify(live.value, null, 2), endpoint: `mongo • ${live.summary} • ${live.ms}ms` });
+          vars[varKey(jsonCard)] = live.value;
+        }
+      }
     } else if (http) {
       nextStatus = http.ok && !shouldFail ? 'success' : 'error';
       logText = `${stepLabel} ${card.title}: HTTP ${http.status} ${http.statusText} (${http.ms}ms)`;
@@ -558,6 +599,7 @@ export default function App() {
     }
     if (assertion) output = JSON.stringify(assertion, null, 2);
     else if (http) output = `HTTP ${http.status} ${http.statusText} (${http.ms}ms)\n\n${http.text}`;
+    else if (live) output = live.ok ? `${live.summary} (${live.ms}ms)\n\n${JSON.stringify(live.value, null, 2)}` : live.summary;
     else {
       const published = vars[varKey(card)];
       output = `${t('simulatedRun')}${published === undefined ? '' : `\n\n${JSON.stringify(published, null, 2)}`}`;
@@ -565,7 +607,7 @@ export default function App() {
     return { status: nextStatus, text: logText, output, at: elapsedOf() };
   };
 
-  // --- TEST FLOW EXECUTION (real requests + simulated assertions) ---
+  // --- TEST FLOW EXECUTION (live requests, assertions and mongo queries) ---
   const runFlowSimulation = async () => {
     if (isRunning) return;
 
@@ -729,13 +771,23 @@ export default function App() {
         {/* Left: project icon + editable name + tag */}
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-slate-50 border border-slate-200/90 rounded-lg px-2.5 py-1.5 shadow-xs">
-            <div className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center shadow-xs">
+            <button
+              onClick={onSwitchProject}
+              title={t('switchProject')}
+              className="w-6 h-6 rounded-md bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-xs"
+            >
               <Layers className="w-3.5 h-3.5" />
-            </div>
+            </button>
             <input
               type="text"
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
+              onBlur={() => {
+                // the storage folder is slug(projectName): keep the URL and recents in sync
+                const name = slug(projectName);
+                setProjectInUrl(name, true);
+                touchRecentProject(name);
+              }}
               aria-label={t('projectNameLabel')}
               className="font-semibold text-sm text-slate-800 bg-transparent border-none outline-none focus:ring-2 focus:ring-blue-500/30 rounded px-1 w-36 sm:w-44"
             />

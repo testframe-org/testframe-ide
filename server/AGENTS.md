@@ -14,6 +14,8 @@ All code comments and messages are in English.
 | `GET /api/v2/frames/{project}` | reads saved frames |
 | `POST /api/v2/sources` | replaces sources (`{type}/{name}.md`, `{name}.private.md`, `{name}/{script}.md`) |
 | `GET /api/v2/sources/{project}` | reads sources |
+| `GET /api/v2/projects` | projects under the projects dir (folders with `testframe/`), most recent first |
+| `POST /api/v2/run/mongo` | `{project, source, script}`: runs a read-only mongo script (`find`/`findOne`/`aggregate`/`countDocuments`/`distinct`, `.sort/.skip/.limit`) with Spring Data `MongoTemplate`; the connection is the `base-url` of `sources/mongo/{source}.md` |
 
 ## Structure
 
@@ -26,6 +28,11 @@ All code comments and messages are in English.
 
 - `app.projects-dir` (env `APP_PROJECTS_DIR`, arg `--app.projects-dir`) → root under which `{project}/testframe/{frames,sources}` lives. The runner injects `../examples`.
 - Port: never hardcoded in properties; the runner passes `SERVER_PORT`/`--server.port` from the root `package.json` config.
+
+## Mongo runner
+
+- `runner/MongoScript` parses `db.<collection>.<op>(args)[.sort(..)][.skip(n)][.limit(n)]` (relaxed JSON via the BSON reader); `runner/MongoScriptRunner` executes it with one `MongoTemplate` per base-url (lazy, 3s server-selection timeout, max 1000 docs).
+- **No server-side Mongo configuration:** Boot's Mongo / Data Mongo auto-configurations are excluded in `ServerApplication`; every connection comes from the edited project's source file. Writes are rejected.
 
 ## Gotchas
 
