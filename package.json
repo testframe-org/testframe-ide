@@ -1,0 +1,22 @@
+{
+  "name": "testframe-ide",
+  "private": true,
+  "type": "module",
+  "description": "TestFrame IDE: the flow-editor client and the framework server (ports/config live in the repo-root package.json).",
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "dev:example": "bun scripts/example.ts",
+    "example:push": "bun scripts/push-example.ts",
+    "smoke": "bun scripts/smoke.ts",
+    "dev:server": "cd server && ./mvnw -q spring-boot:run",
+    "dev:client": "cd client && bun run dev",
+    "build": "bun run build:client & bun run build:server & wait",
+    "build:client": "cd client && bun run build",
+    "build:server": "cd server && ./mvnw -q -DskipTests package",
+    "typecheck": "cd client && bun run typecheck",
+    "test": "bun run test:server && bun run test:client",
+    "test:server": "cd server && ./mvnw -q test",
+    "test:client": "cd client && bun run build",
+    "install:client": "cd client && bun install"
+  }
+}

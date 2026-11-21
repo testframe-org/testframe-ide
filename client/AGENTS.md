@@ -1,0 +1,46 @@
+# AGENTS.md — testframe-ide client (editor)
+
+Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-react` + `zod` v4. Managed with **bun**. All code, comments and docs in English; UI copy goes through i18n (en / pt-BR).
+
+## Structure
+
+- `src/App.tsx` — main canvas (pan/zoom, steps, cards, flow execution, save/load frames)
+- `src/i18n.tsx` — `I18nProvider` + `useI18n()`: every user-visible string lives in the
+  `en` dictionary (authoritative); the `pt` dictionary is typed `Record<TKey, string>` so
+  a missing translation fails the typecheck. Language persists to localStorage; toggle in the header.
+- `src/client-api/` — network layer: `http.ts` (`requestJson` + `ApiError`), `testframe.ts`
+  (framework endpoints), `target.ts` (`runTargetRequest` for flow requests, timed). No `fetch`
+  calls outside this folder except card-driven target dispatch.
+- `src/components/` — `StepFrame`, `TestBlockCard`, `ConnectorArrow`, `AddBlockCircleButton`,
+  `InspectorPanel`, `ExecutionConsole`, `SourcesModal` (source CRUD incl. `scripts/` editor)
+- `src/frames.ts` — **persistence contract**: frame/source `.md` serialization/parsing + zod
+  schemas (`frontmatterSchema`, `sourceSchema`, `sourceFrontmatterSchema`) +
+  `buildFrameFiles`/`rebuildSteps` + `wrapSourcesForSave`/`unwrapSourcesFromLoad` (sources
+  stored as frontmatter + body; custom queries as `scripts/{name}.md`; swagger sources carry
+  no scripts) + variable helpers (`toVarName`, `varNameToFileName`, `substituteTemplates`
+  for `{{varName.path}}` bindings between steps). Changes here must stay in sync with what
+  the server stores (`modules/testframe-ide/server/store/ProjectFileStore.java`).
+- `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `ScriptFile`, `RawSource`, `HttpResult`...)
+
+## Commands
+
+```bash
+bun install
+bun run typecheck   # tsc --noEmit — must pass clean
+bun run build       # vite build
+bun run dev         # only with env from the root runner (bun run dev ./examples/<p>)
+```
+
+## Conventions
+
+- Strict TS: no implicit `any` in new params; component props typed via interfaces.
+- Anything crossing the wire (frame frontmatter, sources) is validated with zod before
+  send/accept. Schema errors surface in the execution console, never as silent crashes.
+- Requests execute live against the framework (`POST /api/v2/echo`) when the endpoint
+  matches `METHOD /path`; validation cards starting with `assert` execute live against
+  `POST /api/v2/assertions`; responses feed the step's JSON result card and publish
+  variables named after each card's `var-name`.
+- Frame file names come from the card `var-name` (camelCase, kebab on disk).
+- Project name defaults to `VITE_PROJECT` (fallback `product-test`); the storage directory
+  is always `slug(projectName)`. The app starts empty and auto-loads saved frames/sources.
+- Keep the Figma look (ring per status, inspector on the right, floating console).
