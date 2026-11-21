@@ -7,7 +7,7 @@
     "dev": "bun scripts/dev.ts",
     "dev:api": "bun scripts/dev.ts --api-only",
     "dev:web": "bun scripts/dev.ts --web-only",
-    "dev:full": "bun ../../modules/testframe-ide/scripts/example.ts .",
+    "dev:full": "bun ../../../../scripts/example.ts .",
     "build": "bun run build:api && bun run build:web",
     "build:api": "cd examples-components/product-api && ./mvnw -q -DskipTests package",
     "build:web": "cd examples-components/product-web && bun install --frozen-lockfile=false && bun run build"
