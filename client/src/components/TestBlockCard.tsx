@@ -19,6 +19,7 @@ interface TestBlockCardProps {
   onSelect: () => void;
   onStartEditCode: () => void;
   onStopEditCode: () => void;
+  onOpenEditor: () => void;
   onUpdateCard: (updates: Partial<Card>) => void;
   onStartResize: (e: React.MouseEvent, direction: ResizeDirection) => void;
   onCopy: () => void;
@@ -35,6 +36,7 @@ export function TestBlockCard({
   onSelect,
   onStartEditCode,
   onStopEditCode,
+  onOpenEditor,
   onUpdateCard,
   onStartResize,
   onCopy
@@ -68,16 +70,19 @@ export function TestBlockCard({
       {/* LIGHT/GRAY HEADER WITH EDITABLE TITLE */}
       <div className="bg-[#BCC0C8] border-b border-slate-400/70 px-3 py-2 rounded-t-[7px] flex items-center justify-between gap-2 shrink-0">
         <div className="flex-1 min-w-0">
-          <input
-            type="text"
-            value={card.title}
-            onChange={(e) => onUpdateCard({ title: e.target.value })}
+          {/* Title opens the card editor (edited there, not inline) */}
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onSelect();
+              onOpenEditor();
             }}
-            className="w-full bg-transparent text-[13px] font-bold text-slate-900 outline-none focus:bg-white/60 rounded px-1 -ml-1 truncate"
-          />
+            title={t('editCardTitle')}
+            className="block w-full text-left text-[13px] font-bold text-slate-900 rounded px-1 -ml-1 truncate hover:bg-white/50 hover:underline decoration-slate-500/60 underline-offset-2 cursor-pointer"
+          >
+            {card.title || card.varName}
+          </button>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[10px] font-mono text-slate-700 truncate">
               {card.endpoint}
@@ -134,12 +139,14 @@ export function TestBlockCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              isEditingCode ? onStopEditCode() : onStartEditCode();
+              if (isEditingCode) onStopEditCode();
+              onOpenEditor();
             }}
+            title={t('editCardTitle')}
             className="px-1.5 py-0.5 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-200 font-medium transition-colors flex items-center gap-1"
           >
-            {!isEditingCode && <Edit3 className="w-3 h-3" />}
-            {isEditingCode ? t('done') : t('edit')}
+            <Edit3 className="w-3 h-3" />
+            {t('edit')}
           </button>
         </div>
       </div>

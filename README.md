@@ -7,7 +7,7 @@ server (Spring Boot) that persists test projects as markdown.
 
 | Path | Description |
 |---|---|
-| `client/` | Vite + React + TS canvas editor (steps, cards, inspector, sources modal) |
+| `client/` | Vite + React + TS canvas editor (Frames/Sources tabs, steps, cards, card edit modal) |
 | `server/` | Spring Boot framework server: frames/sources persistence, echo, assertions |
 | `scripts/` | Parameter-driven runners (all settings arrive as `--key=value`) |
 | `examples/` | Example projects, each a self-contained suite with its own README |

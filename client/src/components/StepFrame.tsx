@@ -15,6 +15,7 @@ interface StepFrameProps {
   onSelectCard: (id: string) => void;
   onStartEditCode: (id: string) => void;
   onStopEditCode: () => void;
+  onOpenEditor: (id: string) => void;
   onUpdateCard: (cardId: string, updates: Partial<Card>) => void;
   onStartCardResize: (e: React.MouseEvent, card: Card, direction: ResizeDirection) => void;
   onStartSplitResize: (e: React.MouseEvent, stepId: string, ratio: number, el: HTMLElement | null) => void;
@@ -36,6 +37,7 @@ export function StepFrame({
   onSelectCard,
   onStartEditCode,
   onStopEditCode,
+  onOpenEditor,
   onUpdateCard,
   onStartCardResize,
   onStartSplitResize,
@@ -68,6 +70,7 @@ export function StepFrame({
             onSelect={() => onSelectCard(card.id)}
             onStartEditCode={() => onStartEditCode(card.id)}
             onStopEditCode={onStopEditCode}
+            onOpenEditor={() => onOpenEditor(card.id)}
             onUpdateCard={(updates) => onUpdateCard(card.id, updates)}
             onStartResize={(e, dir) => onStartCardResize(e, card, dir)}
             onCopy={() => onCopyCode(card)}

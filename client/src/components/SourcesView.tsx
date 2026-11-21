@@ -1,26 +1,25 @@
 import React from 'react';
-import { X, Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle, FileCode2 } from 'lucide-react';
+import { Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle, FileCode2 } from 'lucide-react';
 import { testframeApi } from '../client-api';
 import { SOURCE_TYPES, hasScripts, sourceSchema, unwrapSourcesFromLoad, wrapSourcesForSave } from '../frames';
 import { useI18n } from '../i18n';
 import type { LogLevel, SourceDef, SourceScript } from '../types';
 
-interface SourcesModalProps {
-  open: boolean;
-  onClose: () => void;
+interface SourcesViewProps {
   project: string;
   sources: SourceDef[];
   setSources: React.Dispatch<React.SetStateAction<SourceDef[]>>;
   onLog?: (text: string, type?: LogLevel) => void;
 }
 
-export function SourcesModal({ open, onClose, project, sources, setSources, onLog }: SourcesModalProps) {
+// ============================================================================
+// SOURCES TAB: register and edit the project's sources (full-page view)
+// ============================================================================
+export function SourcesView({ project, sources, setSources, onLog }: SourcesViewProps) {
   const { t } = useI18n();
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [saving, setSaving] = React.useState(false);
   const [errors, setErrors] = React.useState<string[]>([]);
-
-  if (!open) return null;
 
   const current = sources[selectedIndex];
 
@@ -102,16 +101,9 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-[2px]"
-      onMouseDown={onClose}
-    >
-      <div
-        className="w-[880px] max-w-[94vw] h-[620px] max-h-[90vh] bg-white rounded-2xl shadow-2xl flex overflow-hidden"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
+    <div className="flex-1 flex overflow-hidden bg-white">
         {/* SOURCE LIST */}
-        <div className="w-60 shrink-0 border-r border-slate-200 flex flex-col bg-slate-50/70">
+        <div className="w-72 shrink-0 border-r border-slate-200 flex flex-col bg-slate-50/70">
           <div className="h-12 px-3 flex items-center justify-between border-b border-slate-200">
             <span className="text-xs font-bold uppercase tracking-wider text-slate-600">{t('sources')}</span>
             <button
@@ -194,9 +186,6 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
                   className="p-1.5 rounded-lg text-rose-600 hover:bg-rose-50 border border-rose-200"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                </button>
-                <button onClick={onClose} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100">
-                  <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
@@ -299,7 +288,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
                         value={script.body}
                         onChange={(e) => updateScript(i, { body: e.target.value })}
                         placeholder={'db.collection.find({ ... })'}
-                        className="w-full h-16 resize-y bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2.5 rounded border border-slate-700 outline-none focus:border-emerald-500/60"
+                        className="w-full h-40 resize-y bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2.5 rounded border border-slate-700 outline-none focus:border-emerald-500/60"
                       />
                     </div>
                   ))}
@@ -322,7 +311,6 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
             {t('createFirst')}
           </div>
         )}
-      </div>
     </div>
   );
 }

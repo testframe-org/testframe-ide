@@ -31,11 +31,12 @@ import {
 import { runTargetRequest, testframeApi } from './client-api';
 import { useI18n } from './i18n';
 import { ExecutionConsole } from './components/ExecutionConsole';
-import { InspectorPanel } from './components/InspectorPanel';
-import { SourcesModal } from './components/SourcesModal';
+import { CardEditModal } from './components/CardEditModal';
+import { SourcesView } from './components/SourcesView';
 import { StepFrame } from './components/StepFrame';
 import type {
   Card,
+  CardRunResult,
   CardStatus,
   ExecLog,
   HttpResult,
@@ -64,6 +65,9 @@ export default function App() {
   // Selection and editing
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [editingCodeCardId, setEditingCodeCardId] = useState<string | null>(null);
+  const [editorCardId, setEditorCardId] = useState<string | null>(null); // card open in the edit modal
+  const [cardRuns, setCardRuns] = useState<Record<string, CardRunResult>>({}); // last result per card
+  const lastVarsRef = useRef<Record<string, unknown>>({}); // variables of the last run
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Canvas viewport (Figma-style zoom and pan)
@@ -85,7 +89,7 @@ export default function App() {
 
   // Sources and frame persistence (.md files in the project folder)
   const [sources, setSources] = useState<SourceDef[]>([]);
-  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [view, setView] = useState<'frames' | 'sources'>('frames'); // top tabs
   const saveFramesRef = useRef<(() => Promise<void>) | null>(null);
 
   const pushFrameMsg = useCallback(
@@ -175,12 +179,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Find the currently selected card
-  const findSelectedCard = useCallback((): SelectedContext | null => {
+  // Locate a card (with its step/phase) by id
+  const findCardContext = useCallback((cardId: string | null): SelectedContext | null => {
     const phases: PhaseKey[] = ['preCards', 'postCards'];
     for (const step of steps) {
       for (const phase of phases) {
-        const found = step[phase].find((c) => c.id === selectedCardId);
+        const found = step[phase].find((c) => c.id === cardId);
         if (found) {
           return {
             card: found,
@@ -192,9 +196,10 @@ export default function App() {
       }
     }
     return null;
-  }, [steps, selectedCardId]);
+  }, [steps]);
 
-  const selectedContext = findSelectedCard();
+  const editorContext = findCardContext(editorCardId);
+  const closeEditor = useCallback(() => setEditorCardId(null), []);
 
   // Update a specific card property
   const updateCard = useCallback((cardId: string, updates: Partial<Card>) => {
@@ -259,6 +264,9 @@ export default function App() {
     );
     if (selectedCardId === cardId) {
       setSelectedCardId(null);
+    }
+    if (editorCardId === cardId) {
+      setEditorCardId(null);
     }
   };
 
@@ -433,6 +441,130 @@ export default function App() {
     window.addEventListener('mouseup', onMouseUp);
   };
 
+  // Executes one card. Mutates `vars` (publishes this card's variable) and may update the
+  // step's JSON result card. Shared by the full flow run and the single-card run.
+  const executeCard = async (
+    card: Card,
+    step: Step,
+    vars: Record<string, unknown>,
+    elapsedOf: () => string
+  ): Promise<CardRunResult> => {
+    const varKey = cardVarName;
+    const stepLabel = t('logStep', { n: step.number });
+    let output = '';
+    // Forced failure only through an explicit marker in the code
+    const shouldFail =
+      card.code.toLowerCase().includes('force_fail') ||
+      card.code.toLowerCase().includes('expect(false).tobe(true)');
+
+    let http: HttpResult | null = null;
+    let assertion: { passed?: boolean; actual?: unknown; expected?: unknown; operator?: string } | null = null;
+    if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
+      // Live assertion against the framework engine (source type: assert)
+      let input: unknown = {};
+      for (const source of [...step.postCards, ...step.preCards]) {
+        if (source.type === 'json' && source.id !== card.id) {
+          try {
+            input = substituteTemplates(JSON.parse(source.code), vars);
+            break;
+          } catch {
+            /* try the next json card */
+          }
+        }
+      }
+      const assertRes = await runTargetRequest('POST', '/api/v2/assertions', {
+        expression: card.code.trim(),
+        input
+      });
+      if (assertRes.ok) {
+        try {
+          assertion = JSON.parse(assertRes.text);
+        } catch {
+          assertion = null;
+        }
+      } else {
+        assertion = { passed: false, actual: `HTTP ${assertRes.status}`, expected: assertRes.text };
+      }
+    } else if (card.type === 'request') {
+      const parts = endpointParts(card);
+      if (parts) {
+        const payloadCard = step.preCards.find((c) => c.type === 'json');
+        let body: unknown;
+        if (payloadCard) {
+          try {
+            body = substituteTemplates(JSON.parse(payloadCard.code), vars);
+          } catch {
+            body = undefined;
+          }
+        }
+        http = await runTargetRequest(parts.method, parts.path, body);
+      } else {
+        await new Promise<void>((r) => setTimeout(r, 420));
+      }
+    } else {
+      await new Promise<void>((r) => setTimeout(r, 420));
+    }
+
+    let nextStatus: CardStatus;
+    let logText: string;
+
+    if (assertion) {
+      nextStatus = assertion.passed && !shouldFail ? 'success' : 'error';
+      logText = `${stepLabel} ${card.title}: assert ${assertion.passed ? t('logOk') : t('logAssertFail')} (${JSON.stringify(assertion.actual)} ${assertion.operator ?? ''} ${JSON.stringify(assertion.expected)})`;
+      vars[varKey(card)] = assertion;
+    } else if (http) {
+      nextStatus = http.ok && !shouldFail ? 'success' : 'error';
+      logText = `${stepLabel} ${card.title}: HTTP ${http.status} ${http.statusText} (${http.ms}ms)`;
+      if (http.ok) {
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(http.text);
+        } catch {
+          parsed = http.text;
+        }
+        vars[varKey(card)] = parsed;
+        // Feed the step's JSON result card with the real server response
+        const jsonCard = step.postCards.find((c) => c.type === 'json');
+        if (jsonCard) {
+          const pretty =
+            typeof parsed === 'string' ? http.text : JSON.stringify(parsed, null, 2);
+          updateCard(jsonCard.id, {
+            code: pretty,
+            endpoint: `${http.status} ${http.statusText} • ${http.ms}ms`
+          });
+          vars[varKey(jsonCard)] = parsed;
+        }
+      }
+    } else {
+      nextStatus = shouldFail ? 'error' : 'success';
+      logText = `${stepLabel} ${card.title}: ${shouldFail ? t('logAssertFail') : t('logOk')}`;
+      // Simulated cards still publish variables so later steps can bind their data
+      if (!shouldFail && card.type === 'json') {
+        try {
+          vars[varKey(card)] = JSON.parse(card.code);
+        } catch {
+          /* contains unresolved templates: keep without publishing */
+        }
+      } else if (!shouldFail && card.type === 'script') {
+        const resultCard = step.postCards.find((c) => c.type === 'json');
+        if (resultCard) {
+          try {
+            vars[varKey(card)] = JSON.parse(resultCard.code);
+          } catch {
+            /* not parseable yet */
+          }
+        }
+      }
+    }
+    if (assertion) output = JSON.stringify(assertion, null, 2);
+    else if (http) output = `HTTP ${http.status} ${http.statusText} (${http.ms}ms)\n\n${http.text}`;
+    else {
+      const published = vars[varKey(card)];
+      output = `${t('simulatedRun')}${published === undefined ? '' : `\n\n${JSON.stringify(published, null, 2)}`}`;
+    }
+    return { status: nextStatus, text: logText, output, at: elapsedOf() };
+  };
+
   // --- TEST FLOW EXECUTION (real requests + simulated assertions) ---
   const runFlowSimulation = async () => {
     if (isRunning) return;
@@ -460,7 +592,7 @@ export default function App() {
 
     // Variables produced by cards, addressable in later steps via {{varName}}
     const vars: Record<string, unknown> = {};
-    const varKey = cardVarName;
+    lastVarsRef.current = vars;
 
     for (const step of steps) {
       const orderedCards: Card[] = [...step.preCards, ...step.postCards];
@@ -469,113 +601,11 @@ export default function App() {
         updateCard(card.id, { status: 'running' });
 
         const elapsedOf = () => `${((performance.now() - startTime) / 1000).toFixed(2)}s`;
-        const stepLabel = t('logStep', { n: step.number });
 
-        // Forced failure only through an explicit marker in the code
-        const shouldFail =
-          card.code.toLowerCase().includes('force_fail') ||
-          card.code.toLowerCase().includes('expect(false).tobe(true)');
-
-        let http: HttpResult | null = null;
-        let assertion: { passed?: boolean; actual?: unknown; expected?: unknown; operator?: string } | null = null;
-        if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
-          // Live assertion against the framework engine (source type: assert)
-          let input: unknown = {};
-          for (const source of [...step.postCards, ...step.preCards]) {
-            if (source.type === 'json' && source.id !== card.id) {
-              try {
-                input = substituteTemplates(JSON.parse(source.code), vars);
-                break;
-              } catch {
-                /* try the next json card */
-              }
-            }
-          }
-          const assertRes = await runTargetRequest('POST', '/api/v2/assertions', {
-            expression: card.code.trim(),
-            input
-          });
-          if (assertRes.ok) {
-            try {
-              assertion = JSON.parse(assertRes.text);
-            } catch {
-              assertion = null;
-            }
-          } else {
-            assertion = { passed: false, actual: `HTTP ${assertRes.status}`, expected: assertRes.text };
-          }
-        } else if (card.type === 'request') {
-          const parts = endpointParts(card);
-          if (parts) {
-            const payloadCard = step.preCards.find((c) => c.type === 'json');
-            let body: unknown;
-            if (payloadCard) {
-              try {
-                body = substituteTemplates(JSON.parse(payloadCard.code), vars);
-              } catch {
-                body = undefined;
-              }
-            }
-            http = await runTargetRequest(parts.method, parts.path, body);
-          } else {
-            await new Promise<void>((r) => setTimeout(r, 420));
-          }
-        } else {
-          await new Promise<void>((r) => setTimeout(r, 420));
-        }
-
-        let nextStatus: CardStatus;
-        let logText: string;
-
-        if (assertion) {
-          nextStatus = assertion.passed && !shouldFail ? 'success' : 'error';
-          logText = `${stepLabel} ${card.title}: assert ${assertion.passed ? t('logOk') : t('logAssertFail')} (${JSON.stringify(assertion.actual)} ${assertion.operator ?? ''} ${JSON.stringify(assertion.expected)})`;
-          vars[varKey(card)] = assertion;
-        } else if (http) {
-          nextStatus = http.ok && !shouldFail ? 'success' : 'error';
-          logText = `${stepLabel} ${card.title}: HTTP ${http.status} ${http.statusText} (${http.ms}ms)`;
-          if (http.ok) {
-            let parsed: unknown;
-            try {
-              parsed = JSON.parse(http.text);
-            } catch {
-              parsed = http.text;
-            }
-            vars[varKey(card)] = parsed;
-            // Feed the step's JSON result card with the real server response
-            const jsonCard = step.postCards.find((c) => c.type === 'json');
-            if (jsonCard) {
-              const pretty =
-                typeof parsed === 'string' ? http.text : JSON.stringify(parsed, null, 2);
-              updateCard(jsonCard.id, {
-                code: pretty,
-                endpoint: `${http.status} ${http.statusText} • ${http.ms}ms`
-              });
-              vars[varKey(jsonCard)] = parsed;
-            }
-          }
-        } else {
-          nextStatus = shouldFail ? 'error' : 'success';
-          logText = `${stepLabel} ${card.title}: ${shouldFail ? t('logAssertFail') : t('logOk')}`;
-          // Simulated cards still publish variables so later steps can bind their data
-          if (!shouldFail && card.type === 'json') {
-            try {
-              vars[varKey(card)] = JSON.parse(card.code);
-            } catch {
-              /* contains unresolved templates: keep without publishing */
-            }
-          } else if (!shouldFail && card.type === 'script') {
-            const resultCard = step.postCards.find((c) => c.type === 'json');
-            if (resultCard) {
-              try {
-                vars[varKey(card)] = JSON.parse(resultCard.code);
-              } catch {
-                /* not parseable yet */
-              }
-            }
-          }
-        }
-
+        const result = await executeCard(card, step, vars, elapsedOf);
+        const nextStatus = result.status;
+        const logText = result.text;
+        setCardRuns((prev) => ({ ...prev, [card.id]: result }));
         updateCard(card.id, { status: nextStatus });
 
         logs.push({ time: elapsedOf(), text: logText, type: nextStatus === 'error' ? 'error' : 'success' });
@@ -596,6 +626,49 @@ export default function App() {
       { time: totalElapsed, text: t('allPassed'), type: 'success' }
     ]);
     setIsRunning(false);
+  };
+
+  // Runs a single card (from the card editor). Bindings resolve against the variables of the
+  // last full run plus the JSON cards placed before this card.
+  const runCard = async (cardId: string) => {
+    if (isRunning) return;
+    const ctx = findCardContext(cardId);
+    const step = steps.find((s) => s.id === ctx?.stepId);
+    if (!ctx || !step) return;
+    const vars: Record<string, unknown> = { ...lastVarsRef.current };
+    const before: Card[] = [];
+    for (const s of steps) {
+      const ordered = [...s.preCards, ...s.postCards];
+      const idx = ordered.findIndex((c) => c.id === cardId);
+      before.push(...(idx >= 0 ? ordered.slice(0, idx) : ordered));
+      if (idx >= 0) break;
+    }
+    for (const c of before) {
+      const key = cardVarName(c);
+      if (c.type === 'json' && vars[key] === undefined) {
+        try {
+          vars[key] = JSON.parse(c.code);
+        } catch {
+          /* unresolved templates: skip */
+        }
+      }
+    }
+    setIsRunning(true);
+    updateCard(cardId, { status: 'running' });
+    const startTime = performance.now();
+    const elapsedOf = () => `${((performance.now() - startTime) / 1000).toFixed(2)}s`;
+    try {
+      const result = await executeCard(ctx.card, step, vars, elapsedOf);
+      updateCard(cardId, { status: result.status });
+      setCardRuns((prev) => ({ ...prev, [cardId]: result }));
+      setExecutionLogs((prev) => [...prev, { time: result.at, text: result.text, type: result.status === 'error' ? 'error' : 'success' }]);
+      lastVarsRef.current = vars;
+    } catch (err) {
+      updateCard(cardId, { status: 'error' });
+      setCardRuns((prev) => ({ ...prev, [cardId]: { status: 'error', text: (err as Error).message, output: String(err), at: elapsedOf() } }));
+    } finally {
+      setIsRunning(false);
+    }
   };
 
   const handleCopyCode = (card: Card) => {
@@ -787,14 +860,6 @@ export default function App() {
             </span>
           )}
 
-          <button
-            onClick={() => setSourcesOpen(true)}
-            title={t('sourcesHint')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 hover:border-slate-400 transition-all shadow-2xs active:scale-[0.98]"
-          >
-            <Database className="w-3.5 h-3.5 text-purple-600" />
-            {t('sources')}
-          </button>
 
           <button
             onClick={loadFrames}
@@ -847,8 +912,39 @@ export default function App() {
       </header>
 
       {/* =====================================================================
-          2. MAIN AREA: DOTTED INFINITE CANVAS + SIDE INSPECTOR
+          TABS: FRAMES (canvas) | SOURCES (registry)
          ===================================================================== */}
+      <nav role="tablist" className="h-10 bg-white border-b border-slate-200 px-4 flex items-end gap-1 shrink-0 z-20">
+        {([
+          ['frames', t('tabFrames'), Layers],
+          ['sources', t('tabSources'), Database]
+        ] as const).map(([id, label, Icon]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={view === id}
+            onClick={() => setView(id)}
+            className={`flex items-center gap-1.5 px-3.5 h-9 -mb-px text-xs font-semibold border-b-2 transition-colors ${
+              view === id
+                ? 'border-blue-600 text-blue-700'
+                : 'border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300'
+            }`}
+          >
+            <Icon className={`w-3.5 h-3.5 ${id === 'sources' ? 'text-purple-600' : 'text-blue-600'}`} />
+            {label}
+            {id === 'sources' && (
+              <span className="text-[10px] font-mono px-1.5 rounded-full bg-slate-100 text-slate-500">{sources.length}</span>
+            )}
+          </button>
+        ))}
+      </nav>
+
+      {/* =====================================================================
+          2. MAIN AREA: DOTTED INFINITE CANVAS
+         ===================================================================== */}
+      {view === 'sources' ? (
+        <SourcesView project={slug(projectName)} sources={sources} setSources={setSources} onLog={pushFrameMsg} />
+      ) : (
       <div className="flex-1 flex overflow-hidden relative">
         {/* INFINITE CANVAS (WITH PAN AND ZOOM) */}
         <main
@@ -893,6 +989,10 @@ export default function App() {
                 onSelectCard={(id) => setSelectedCardId(id)}
                 onStartEditCode={(id) => setEditingCodeCardId(id)}
                 onStopEditCode={() => setEditingCodeCardId(null)}
+                onOpenEditor={(id) => {
+                  setSelectedCardId(id);
+                  setEditorCardId(id);
+                }}
                 onUpdateCard={updateCard}
                 onStartCardResize={startCardResize}
                 onStartSplitResize={startSplitResize}
@@ -951,24 +1051,25 @@ export default function App() {
           </div>
         </main>
 
-        {/* RIGHT SIDE INSPECTOR */}
-        <InspectorPanel
-          selectedContext={selectedContext}
-          sources={sources}
-          onUpdateCard={updateCard}
-          onDeleteCard={deleteCard}
-          onOpenSources={() => setSourcesOpen(true)}
-        />
-
-        <SourcesModal
-          open={sourcesOpen}
-          onClose={() => setSourcesOpen(false)}
-          project={slug(projectName)}
-          sources={sources}
-          setSources={setSources}
-          onLog={pushFrameMsg}
-        />
       </div>
+      )}
+
+      {/* CARD EDITOR (opened from a card's Edit button) */}
+      <CardEditModal
+        selectedContext={editorContext}
+        sources={sources}
+        onClose={closeEditor}
+        onRun={runCard}
+        running={isRunning}
+        lastRun={editorCardId ? cardRuns[editorCardId] : undefined}
+        onUpdateCard={updateCard}
+        onDeleteCard={deleteCard}
+        onOpenSources={() => {
+          setEditorCardId(null);
+          setView('sources');
+        }}
+      />
     </div>
   );
 }
+

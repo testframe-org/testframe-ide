@@ -44,7 +44,7 @@ Any `*.private.md` may have a versioned `*.private.example.md` sibling (see belo
 
 The names convert both ways: `getActiveProducts` ↔ `get-active-products.md`. Var-names
 must be camelCase with no consecutive capitals (`getHttpData`, not `getHTTPData`), or the
-round trip would lose information. The inspector normalizes input, and save rejects
+round trip would lose information. The card editor normalizes input, and save rejects
 duplicate var-names within a frame, because var-names are the binding identity.
 
 ## Cards: `frames/{frame}/step-{n}/{var-file}.md`
@@ -77,7 +77,7 @@ var-name, http-method.
 
 - Cards (`{var-file}.private.md`) and sources (`{name-source}.private.md`) keep secrets
   and access notes in a sibling file with an empty frontmatter. The IDE edits it in the
-  inspector (cards) and the Sources modal (sources).
+  card edit modal (cards) and the Sources tab (sources).
 - `*.private.md` is gitignored. A versioned `*.private.example.md` next to it is the
   template: it is loaded when the private file is missing, and the next save writes the
   real `.private.md`. The server never deletes `*.private.example.md`.

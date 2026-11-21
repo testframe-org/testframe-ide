@@ -12,7 +12,9 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   (framework endpoints), `target.ts` (`runTargetRequest` for flow requests, timed). No `fetch`
   calls outside this folder except card-driven target dispatch.
 - `src/components/` — `StepFrame`, `TestBlockCard`, `ConnectorArrow`, `AddBlockCircleButton`,
-  `InspectorPanel`, `ExecutionConsole`, `SourcesModal` (source CRUD incl. `scripts/` editor)
+  `CardEditModal` (opened by a card's Edit button: general fields on the left, `SourceForm` on the right),
+  `SourceForm` (one form per type-source: http, swagger, query, assert, json, expression, code),
+  `ExecutionConsole`, `SourcesView` (the Sources tab: source CRUD incl. the scripts editor)
 - `src/frames.ts` — **persistence contract** (spec: `../docs/project-format.md`): card/source
   `.md` serialization + zod schemas (`cardFrontmatterSchema`, `sourceSchema`) +
   `buildFrameFiles(frame, steps, sources)` / `rebuildFrames(files, sources)` / `pickFrame` +
@@ -45,4 +47,6 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
   an empty body on disk while they match it. Default var-names are English identifiers.
 - Project name defaults to `VITE_PROJECT` (fallback `product-test`); the storage directory
   is always `slug(projectName)`. The app starts empty and auto-loads saved frames/sources.
-- Keep the Figma look (ring per status, inspector on the right, floating console).
+- The top tabs switch between Frames (canvas) and Sources (registry). There is no side inspector:
+  cards are edited in `CardEditModal`; double-click on a card body still edits its code inline.
+- Keep the Figma look (ring per status, floating console).

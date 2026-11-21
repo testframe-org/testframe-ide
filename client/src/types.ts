@@ -22,6 +22,14 @@ export interface Card {
   httpMethod: string;
 }
 
+// Outcome of executing one card (shown in the card editor and the console)
+export interface CardRunResult {
+  status: CardStatus;
+  text: string; // one-line log
+  output: string; // response / assertion result / simulated note
+  at: string; // elapsed time label
+}
+
 export interface Step {
   id: string;
   number: number;
