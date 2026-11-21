@@ -15,5 +15,8 @@
     "test:server": "cd server && ./mvnw -q test",
     "test:client": "cd client && bun run build",
     "install:client": "cd client && bun install"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
   }
 }
