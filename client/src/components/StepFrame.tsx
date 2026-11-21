@@ -59,7 +59,7 @@ export function StepFrame({
       : t('assertsMany', { n: step.postCards.length });
 
   const phaseCards = (phaseKey: PhaseKey) => (
-    <div className="flex-1 flex items-center gap-2 overflow-x-auto pb-2">
+    <div className="flex-1 flex items-center gap-2 overflow-x-auto scrollbar-hidden pb-2">
       {step[phaseKey].map((card, index) => (
         <React.Fragment key={card.id}>
           <TestBlockCard

@@ -1,1 +1,9 @@
 @import "tailwindcss";
+
+/* Scrollable without a visible scrollbar (e.g. the card rows of a step) */
+@utility scrollbar-hidden {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
