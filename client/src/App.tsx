@@ -15,7 +15,19 @@ import {
   Save,
   FolderDown
 } from 'lucide-react';
-import { buildFrameFiles, endpointParts, rebuildSteps, slug, substituteTemplates, toVarName, unwrapSourcesFromLoad } from './frames';
+import {
+  DEFAULT_CARD_SIZE,
+  DEFAULT_FRAME,
+  DEFAULT_TIMEOUT,
+  buildFrameFiles,
+  cardVarName,
+  endpointParts,
+  pickFrame,
+  rebuildFrames,
+  slug,
+  substituteTemplates,
+  unwrapSourcesFromLoad
+} from './frames';
 import { runTargetRequest, testframeApi } from './client-api';
 import { useI18n } from './i18n';
 import { ExecutionConsole } from './components/ExecutionConsole';
@@ -45,6 +57,8 @@ export default function App() {
   const [projectName, setProjectName] = useState<string>(
     import.meta.env.VITE_PROJECT ?? 'product-test'
   );
+  // The canvas shows one frame (flow): frames/{frameName}/step-{n}/{var-file}.md
+  const [frameName, setFrameName] = useState<string>(DEFAULT_FRAME);
   const [steps, setSteps] = useState<Step[]>([]);
 
   // Selection and editing
@@ -93,10 +107,15 @@ export default function App() {
 
       const project = slug(projectName);
 
-      // Silent auto-load of persisted sources and frames
+      // Silent auto-load of persisted sources and frames (sources first: cards may
+      // inherit their body from a source script)
+      let loadedSources: SourceDef[] = [];
       try {
         const data = await testframeApi.loadSources(project);
-        if (data.sources?.length) setSources(unwrapSourcesFromLoad(data.sources));
+        if (data.sources?.length) {
+          loadedSources = unwrapSourcesFromLoad(data.sources);
+          setSources(loadedSources);
+        }
       } catch {
         /* no saved sources yet */
       }
@@ -104,16 +123,16 @@ export default function App() {
       try {
         const data = await testframeApi.loadFrames(project);
         if (data.files.length) {
-          const loaded = rebuildSteps(data.files);
-          if (loaded.steps.length) {
-            setSteps(loaded.steps);
-            setSelectedCardId(loaded.steps[0]?.preCards[0]?.id ?? null);
-            if (loaded.errors.length) {
-              pushFrameMsg(
-                t('stepsLoadedWarn', { n: loaded.steps.length, m: loaded.errors.length }),
-                'error'
-              );
-            }
+          const loaded = rebuildFrames(data.files, loadedSources);
+          const frame = pickFrame(loaded.frames);
+          if (frame?.steps.length) {
+            setFrameName(frame.name);
+            setSteps(frame.steps);
+            setSelectedCardId(frame.steps[0]?.preCards[0]?.id ?? null);
+          }
+          if (loaded.errors.length) {
+            pushFrameMsg(t('stepsLoadedWarn', { n: frame?.steps.length ?? 0, m: loaded.errors.length }), 'error');
+            loaded.errors.forEach((e) => pushFrameMsg(e, 'error'));
           }
         }
       } catch {
@@ -188,22 +207,31 @@ export default function App() {
     );
   }, []);
 
+  // var-names are the binding identity of a frame (and its file names): keep them unique.
+  // Defaults are English identifiers regardless of the UI language.
+  const uniqueVarName = (base: string, taken: Step[] = steps): string => {
+    const used = new Set(taken.flatMap((s) => [...s.preCards, ...s.postCards]).map(cardVarName));
+    let name = base;
+    for (let i = 2; used.has(name); i++) name = `${base}${i}`;
+    return name;
+  };
+
   // Add a new card to a phase (pre or post)
   const addCardToPhase = (stepId: string, phaseKey: PhaseKey) => {
     const isPre = phaseKey === 'preCards';
     const newId = `card-${Date.now()}`;
+    const type = isPre ? 'request' : 'validation';
     const newCard: Card = {
       id: newId,
       title: isPre ? t('defaultRequestTitle') : t('defaultAssertionTitle'),
-      varName: toVarName(isPre ? t('defaultRequestTitle') : t('defaultAssertionTitle')),
-      type: isPre ? 'request' : 'validation',
-      width: 240,
-      height: 165,
-      timeout: 3000,
+      varName: uniqueVarName(isPre ? 'newRequest' : 'newAssertion'),
+      type,
+      ...DEFAULT_CARD_SIZE[type],
+      timeout: DEFAULT_TIMEOUT[type],
       status: 'idle',
-      endpoint: isPre ? 'POST /api/v2/echo' : t('defaultSchemaEndpoint'),
+      endpoint: isPre ? 'POST /api/v2/echo' : '',
       sourceType: isPre ? 'restapi' : 'inline',
-      sourceName: isPre ? 'framework-echo-api' : 'assercoes',
+      sourceName: isPre ? 'framework-echo-api' : '',
       httpMethod: isPre ? 'POST' : '',
       code: isPre
         ? `// New execution step\nconst res = await api.post('/api/v2/echo', {\n  ping: true\n});`
@@ -249,11 +277,10 @@ export default function App() {
         {
           id: preId,
           title: t('defaultStepTitle', { n: nextNumber }),
-          varName: toVarName(t('defaultStepTitle', { n: nextNumber })),
+          varName: uniqueVarName(`step${nextNumber}Request`),
           type: 'request',
-          width: 320,
-          height: 210,
-          timeout: 5000,
+          ...DEFAULT_CARD_SIZE.request,
+          timeout: DEFAULT_TIMEOUT.request,
           status: 'idle',
           endpoint: 'POST /api/v2/echo',
           sourceType: 'restapi',
@@ -266,15 +293,14 @@ export default function App() {
         {
           id: postId,
           title: t('defaultJsonResultTitle'),
-          varName: toVarName(t('defaultJsonResultTitle')),
+          varName: uniqueVarName(`step${nextNumber}Result`),
           type: 'json',
-          width: 290,
-          height: 185,
-          timeout: 2000,
+          ...DEFAULT_CARD_SIZE.json,
+          timeout: DEFAULT_TIMEOUT.json,
           status: 'idle',
-          endpoint: '200 OK',
+          endpoint: '',
           sourceType: 'inline',
-          sourceName: 'resultado-etapa',
+          sourceName: '',
           httpMethod: '',
           code: `{\n  "status": "PROCESSED",\n  "request_id": "REQ-${nextNumber}"\n}`
         }
@@ -434,7 +460,7 @@ export default function App() {
 
     // Variables produced by cards, addressable in later steps via {{varName}}
     const vars: Record<string, unknown> = {};
-    const varKey = (c: Card) => c.varName || toVarName(c.title);
+    const varKey = cardVarName;
 
     for (const step of steps) {
       const orderedCards: Card[] = [...step.preCards, ...step.postCards];
@@ -578,11 +604,12 @@ export default function App() {
     setTimeout(() => setCopiedId(null), 1500);
   };
 
-  // --- PERSISTENCE: {project}/testframe/frames/{name-frame}/{step-id}/{card-id}.md ---
+  // --- PERSISTENCE: {project}/testframe/frames/{frame}/step-{n}/{var-file}.md ---
+  // The server replaces the frame directory, so removed cards do not linger on disk.
   const saveFrames = async () => {
     try {
-      const files = buildFrameFiles(steps);
-      const data = await testframeApi.saveFrames(slug(projectName), files);
+      const files = buildFrameFiles(frameName, steps, sources);
+      const data = await testframeApi.saveFrames(slug(projectName), slug(frameName), files);
       pushFrameMsg(t('framesSaved', { n: data.saved, root: data.root }), 'success');
     } catch (err) {
       pushFrameMsg(t('framesSaveFail', { msg: (err as Error).message }), 'error');
@@ -597,19 +624,22 @@ export default function App() {
         pushFrameMsg(t('noFramesSaved'), 'error');
         return;
       }
-      const loaded = rebuildSteps(data.files);
-      if (!loaded.steps.length) {
+      const loaded = rebuildFrames(data.files, sources);
+      const frame = pickFrame(loaded.frames, frameName);
+      if (!frame?.steps.length) {
         pushFrameMsg(t('framesInvalid', { msg: loaded.errors[0] || 'unrecognized schema' }), 'error');
         return;
       }
-      setSteps(loaded.steps);
-      setSelectedCardId(loaded.steps[0]?.preCards[0]?.id ?? loaded.steps[0]?.postCards[0]?.id ?? null);
+      setFrameName(frame.name);
+      setSteps(frame.steps);
+      setSelectedCardId(frame.steps[0]?.preCards[0]?.id ?? frame.steps[0]?.postCards[0]?.id ?? null);
       pushFrameMsg(
         loaded.errors.length
-          ? t('stepsLoadedWarn', { n: loaded.steps.length, m: loaded.errors.length })
-          : t('stepsLoaded', { n: loaded.steps.length }),
+          ? t('stepsLoadedWarn', { n: frame.steps.length, m: loaded.errors.length })
+          : t('stepsLoaded', { n: frame.steps.length }),
         loaded.errors.length ? 'error' : 'success'
       );
+      loaded.errors.forEach((e) => pushFrameMsg(e, 'error'));
     } catch (err) {
       pushFrameMsg(t('framesLoadFail', { msg: (err as Error).message }), 'error');
     }
@@ -634,7 +664,17 @@ export default function App() {
               value={projectName}
               onChange={(e) => setProjectName(e.target.value)}
               aria-label={t('projectNameLabel')}
-              className="font-semibold text-sm text-slate-800 bg-transparent border-none outline-none focus:ring-2 focus:ring-blue-500/30 rounded px-1 w-44 sm:w-52"
+              className="font-semibold text-sm text-slate-800 bg-transparent border-none outline-none focus:ring-2 focus:ring-blue-500/30 rounded px-1 w-36 sm:w-44"
+            />
+            <span className="text-slate-300 text-sm">/</span>
+            <input
+              type="text"
+              value={frameName}
+              onChange={(e) => setFrameName(e.target.value)}
+              onBlur={() => setFrameName((name) => slug(name))}
+              aria-label={t('frameNameLabel')}
+              title={t('frameNameLabel')}
+              className="font-mono text-xs text-slate-600 bg-transparent border-none outline-none focus:ring-2 focus:ring-blue-500/30 rounded px-1 w-28 sm:w-36"
             />
             <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700 border border-purple-200/70">
               {t('suiteBadge')}

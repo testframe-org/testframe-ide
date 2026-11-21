@@ -3,6 +3,7 @@ import type {
   Card,
   CardType,
   EndpointParts,
+  Frame,
   FrameFile,
   PhaseKey,
   RawSource,
@@ -13,7 +14,20 @@ import type {
   WrappedSource
 } from './types';
 
-// Frame .md separators (parameter frontmatter + code body)
+// ============================================================================
+// PROJECT FORMAT (see modules/testframe-ide/docs/project-format.md)
+//
+//   {project}/testframe/
+//     frames/{frame}/step-{n}/{var-file}.md         one card; var-name = camelCase(var-file)
+//     sources/{type}/{name}/public-data.md           base-url + docs
+//     sources/{type}/{name}/private-data.md          optional, never carries base-url
+//     sources/{type}/{name}/scripts/{script-file}.md one custom query/method; name = camelCase(script-file)
+//
+// Identity (frame, step number, var-name, source type/name, script name) always comes
+// from the path. Frontmatter stores only what the path cannot express.
+// ============================================================================
+
+// .md separators (frontmatter + body), shared by every file of a project
 export const FRAME_SEP = '-------------------';
 export const BODY_SEP = '--------body----------';
 
@@ -38,13 +52,63 @@ export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
 const CARD_TYPES: CardType[] = ['request', 'script', 'json', 'validation'];
 
+// Frame used when a project has none yet
+export const DEFAULT_FRAME = 'main';
+
+// Layout defaults: `size` is only written when a card differs from these
+export const DEFAULT_CARD_SIZE: Record<CardType, { width: number; height: number }> = {
+  request: { width: 320, height: 210 },
+  script: { width: 320, height: 210 },
+  json: { width: 290, height: 185 },
+  validation: { width: 240, height: 165 }
+};
+
+export const DEFAULT_TIMEOUT: Record<CardType, number> = {
+  request: 5000,
+  script: 5000,
+  json: 2000,
+  validation: 1000
+};
+
 export const slug = (text: string): string =>
   String(text)
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'unnamed';
+
+// Variable name (camelCase) from a human title, e.g. 'Get active products' -> getActiveProducts
+export const toVarName = (text: string): string => {
+  const words = slug(text).split('-').filter(Boolean);
+  return words
+    .map((word, i) => (i === 0 ? word : word[0].toUpperCase() + word.slice(1)))
+    .join('');
+};
+
+// File name is the kebab-case of the variable, e.g. getActiveProducts -> get-active-products
+export const varNameToFileName = (varName: string): string =>
+  varName
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .toLowerCase()
+    .replace(/^-+|-+$/g, '') || 'card';
+
+// Reverse of varNameToFileName: get-active-products -> getActiveProducts
+export const fileNameToVarName = (fileName: string): string => toVarName(fileName.replace(/\.md$/, ''));
+
+// Coerces user input into a var-name that survives the file-name round trip
+// (camelCase, no consecutive capitals): 'getHTTP data' -> getHttpData
+export const normalizeVarName = (input: string): string => fileNameToVarName(varNameToFileName(input));
+
+const isRoundTripName = (name: string): boolean => normalizeVarName(name) === name;
+
+const camelName = (what: string) =>
+  z
+    .string()
+    .min(2, `${what} too short`)
+    .regex(/^[a-z][a-zA-Z0-9]*$/, `${what} must be camelCase`)
+    .refine(isRoundTripName, `${what} must survive the kebab-case file name (no consecutive capitals)`);
 
 // --- SCHEMAS (zod) ---
 export const sourceSchema = z.object({
@@ -59,80 +123,50 @@ export const sourceSchema = z.object({
   scripts: z
     .array(
       z.object({
-        name: z
-          .string()
-          .min(2, 'script name too short')
-          .regex(/^[a-z][a-zA-Z0-9]*$/, 'script name must be camelCase'),
+        name: camelName('script name'),
         body: z.string().default('')
       })
     )
     .default([])
 });
 
-// Source .md files use the same frame contract: frontmatter + body
+// public-data.md: the only source fact the path cannot express. Unknown keys from the
+// legacy format (name-source, type-source, kind, project) are ignored on load.
 const sourceFrontmatterSchema = z.object({
-  'name-source': z.string().min(1),
-  'type-source': z.enum(SOURCE_TYPES),
-  kind: z.enum(['public-data', 'private-data']),
-  project: z.string().default(''),
-  'base-url': z.string().default('')
+  'base-url': z.string().optional()
 });
 
-// scripts/{name}.md frontmatter
-const scriptFrontmatterSchema = z.object({
-  'script-name': z.string().min(1),
-  'name-source': z.string().min(1),
-  'type-source': z.enum(SOURCE_TYPES),
-  project: z.string().default('')
-});
+const SOURCE_REF_RE = /^([a-z]+)(?:\/([a-z0-9][a-z0-9._-]*))?$/i;
 
-const frontmatterSchema = z.object({
-  'card-id': z.string().min(1),
-  'step-id': z.string().min(1),
-  'step-number': z.coerce.number().int().min(1),
-  'frame-name': z.string().min(1),
-  'var-name': z
-    .string()
-    .regex(/^[a-z][a-zA-Z0-9]*$/, 'var-name must be camelCase')
-    .optional(),
-  'card-type': z.enum(CARD_TYPES as [CardType, ...CardType[]]),
-  phase: z.enum(['pre', 'post']),
-  order: z.coerce.number().int().min(0),
-  'type-source': z.enum(SOURCE_TYPES),
-  'type-name-source': z.string().default(''),
-  'http-method': z.enum(HTTP_METHODS).optional(),
-  endpoint: z.string().default(''),
-  timeout: z.coerce.number().int().min(100).max(120000),
-  width: z.coerce.number().int().min(120).max(900),
-  height: z.coerce.number().int().min(80).max(800)
-});
+// frames/{frame}/step-{n}/{var-file}.md
+const FRAME_PATH_RE = /^([a-z0-9][a-z0-9-]*)\/step-(\d+)\/([a-z0-9][a-z0-9-]*)\.md$/;
 
-export type FrameParseResult =
-  | { ok: false; errors: string[] }
-  | {
-      ok: true;
-      meta: { stepId: string; stepNumber: number; phase: 'pre' | 'post'; order: number };
-      card: Card;
-    };
+export const cardFrontmatterSchema = z
+  .object({
+    title: z.string().min(1),
+    type: z.enum(CARD_TYPES as [CardType, ...CardType[]]),
+    phase: z.enum(['pre', 'post']),
+    order: z.coerce.number().int().min(1),
+    source: z
+      .string()
+      .regex(SOURCE_REF_RE, 'source must be {type-source} or {type-source}/{name-source}')
+      .refine((ref) => (SOURCE_TYPES as readonly string[]).includes(ref.split('/')[0]), 'unknown type-source')
+      .optional(),
+    script: camelName('script').optional(),
+    endpoint: z.string().optional(),
+    timeout: z.coerce.number().int().min(100).max(120000).optional(),
+    size: z
+      .string()
+      .regex(/^\d+x\d+$/, 'size must be {width}x{height}')
+      .optional()
+  })
+  .refine((f) => !f.script || (f.source ?? '').includes('/'), {
+    message: 'script requires source: {type-source}/{name-source}',
+    path: ['script']
+  });
 
 export const defaultSourceType = (type: CardType): string =>
-  ({ request: 'restapi', script: 'mongo', json: 'mapper', validation: 'assert' })[type] || 'inline';
-
-// Variable name (camelCase) from a human title, e.g. 'Obter produtos ativos' -> obterProdutosAtivos
-export const toVarName = (text: string): string => {
-  const words = slug(text).split('-').filter(Boolean);
-  return words
-    .map((word, i) => (i === 0 ? word : word[0].toUpperCase() + word.slice(1)))
-    .join('');
-};
-
-// File name is the kebab-case of the variable, e.g. obterProdutosAtivos -> obter-produtos-ativos.md
-export const varNameToFileName = (varName: string): string =>
-  varName
-    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .toLowerCase()
-    .replace(/^-+|-+$/g, '') || 'frame';
+  ({ request: 'restapi', script: 'mongo', json: 'inline', validation: 'assert' })[type] || 'inline';
 
 // --- HELPERS ---
 export const endpointParts = (card: Pick<Card, 'endpoint' | 'httpMethod'>): EndpointParts | null => {
@@ -143,49 +177,6 @@ export const endpointParts = (card: Pick<Card, 'endpoint' | 'httpMethod'>): Endp
     return { method: String(card.httpMethod).toUpperCase(), path: trimmed };
   }
   return null;
-};
-
-export const cardToFrameMd = (card: Card, step: Step, phaseKey: PhaseKey, order: number): string => {
-  const parts = endpointParts(card);
-  const lines: string[] = [
-    FRAME_SEP,
-    `card-id: ${card.id}`,
-    `step-id: ${step.id}`,
-    `step-number: ${step.number}`,
-    `frame-name: ${card.title}`,
-    `var-name: ${card.varName || toVarName(card.title)}`,
-    `card-type: ${card.type}`,
-    `phase: ${phaseKey === 'preCards' ? 'pre' : 'post'}`,
-    `order: ${order}`,
-    `type-source: ${card.sourceType || defaultSourceType(card.type)}`,
-    `type-name-source: ${card.sourceName || ''}`
-  ];
-  if (parts) lines.push(`http-method: ${parts.method}`);
-  lines.push(
-    `endpoint: ${card.endpoint}`,
-    `timeout: ${card.timeout}`,
-    `width: ${card.width}`,
-    `height: ${card.height}`,
-    BODY_SEP
-  );
-  return `${lines.join('\n')}\n${card.code}\n`;
-};
-
-// Structure: {project}/testframe/frames/{name-frame}/{step-id}/{card-id}.md
-export const buildFrameFiles = (steps: Step[]): FrameFile[] => {
-  const files: FrameFile[] = [];
-  for (const step of steps) {
-    for (const phaseKey of ['preCards', 'postCards'] as PhaseKey[]) {
-      step[phaseKey].forEach((card, idx) => {
-        const fileName = varNameToFileName(card.varName || toVarName(card.title));
-        files.push({
-          path: `${slug(card.title)}/${slug(step.id)}/${fileName}.md`,
-          content: cardToFrameMd(card, step, phaseKey, idx + 1)
-        });
-      });
-    }
-  }
-  return files;
 };
 
 export const parseFrameMd = (md: string): { fields: Record<string, string>; code: string } => {
@@ -201,9 +192,100 @@ export const parseFrameMd = (md: string): { fields: Record<string, string>; code
   return { fields, code };
 };
 
-export const frameMdToCard = (md: string): FrameParseResult => {
-  const { fields, code } = parseFrameMd(md);
-  const parsed = frontmatterSchema.safeParse(fields);
+const hasEnvelope = (content: string): boolean => content.startsWith(FRAME_SEP) && content.includes(BODY_SEP);
+
+const renderMd = (fields: [string, string | number | undefined][], body: string): string => {
+  const lines = [FRAME_SEP];
+  for (const [key, value] of fields) {
+    if (value !== undefined && String(value) !== '') lines.push(`${key}: ${value}`);
+  }
+  lines.push(BODY_SEP);
+  const text = body.replace(/\n+$/, '');
+  return `${lines.join('\n')}\n${text ? `${text}\n` : ''}`;
+};
+
+// `source:` reference, e.g. mongo/products-db; inline cards carry none
+export const sourceRef = (card: Pick<Card, 'sourceType' | 'sourceName'>): string | undefined => {
+  const type = (card.sourceType || '').trim();
+  if (!type || type === 'inline') return undefined;
+  const name = (card.sourceName || '').trim();
+  return name ? `${type}/${name}` : type;
+};
+
+export const findScript = (
+  sources: SourceDef[],
+  card: Pick<Card, 'sourceType' | 'sourceName' | 'script'>
+): SourceScript | undefined => {
+  if (!card.script) return undefined;
+  const source = sources.find((s) => s.typeSource === card.sourceType && s.name === card.sourceName);
+  return source?.scripts?.find((s) => s.name === card.script);
+};
+
+// --- CARDS: frames/{frame}/step-{n}/{var-file}.md ---
+export const cardToMd = (card: Card, phase: 'pre' | 'post', order: number, sources: SourceDef[] = []): string => {
+  const size = DEFAULT_CARD_SIZE[card.type];
+  const customSize = card.width !== size.width || card.height !== size.height;
+  // A card bound to a source script stores an empty body while it still matches the script
+  const script = findScript(sources, card);
+  const inherits = !!script && card.code.trim() === script.body.trim();
+  return renderMd(
+    [
+      ['title', card.title.trim() || card.varName],
+      ['type', card.type],
+      ['phase', phase],
+      ['order', order],
+      ['source', sourceRef(card)],
+      ['script', card.script || undefined],
+      ['endpoint', card.endpoint.trim() || undefined],
+      ['timeout', card.timeout],
+      ['size', customSize ? `${card.width}x${card.height}` : undefined]
+    ],
+    inherits ? '' : card.code
+  );
+};
+
+export const cardVarName = (card: Pick<Card, 'varName' | 'title'>): string => card.varName || toVarName(card.title);
+
+// Serializes one frame. Throws on var-names that cannot be stored (duplicates or names
+// that do not survive the kebab-case file name), since bindings rely on them.
+export const buildFrameFiles = (frame: string, steps: Step[], sources: SourceDef[] = []): FrameFile[] => {
+  const frameDir = slug(frame);
+  const seen = new Map<string, string>();
+  const files: FrameFile[] = [];
+  steps.forEach((step, stepIdx) => {
+    for (const phaseKey of ['preCards', 'postCards'] as PhaseKey[]) {
+      step[phaseKey].forEach((card, idx) => {
+        const varName = cardVarName(card);
+        if (!isRoundTripName(varName)) {
+          throw new Error(`var-name "${varName}" cannot be stored; use "${normalizeVarName(varName)}"`);
+        }
+        const where = `step ${stepIdx + 1} "${card.title}"`;
+        if (seen.has(varName)) {
+          throw new Error(`var-name "${varName}" is used twice (${seen.get(varName)} and ${where})`);
+        }
+        seen.set(varName, where);
+        files.push({
+          path: `${frameDir}/step-${stepIdx + 1}/${varNameToFileName(varName)}.md`,
+          content: cardToMd(card, phaseKey === 'preCards' ? 'pre' : 'post', idx + 1, sources)
+        });
+      });
+    }
+  });
+  return files;
+};
+
+export type CardParseResult =
+  | { ok: false; errors: string[] }
+  | { ok: true; frame: string; stepNumber: number; phase: 'pre' | 'post'; order: number; card: Card; warnings: string[] };
+
+export const parseCardFile = (file: FrameFile, sources: SourceDef[] = []): CardParseResult => {
+  const pathMatch = file.path.match(FRAME_PATH_RE);
+  if (!pathMatch) {
+    return { ok: false, errors: ['path must be {frame}/step-{n}/{var-name}.md'] };
+  }
+  const [, frame, stepNo, fileBase] = pathMatch;
+  const { fields, code } = parseFrameMd(file.content);
+  const parsed = cardFrontmatterSchema.safeParse(fields);
   if (!parsed.success) {
     return {
       ok: false,
@@ -211,136 +293,136 @@ export const frameMdToCard = (md: string): FrameParseResult => {
     };
   }
   const f = parsed.data;
-  return {
-    ok: true,
-    meta: { stepId: f['step-id'], stepNumber: f['step-number'], phase: f.phase, order: f.order },
-    card: {
-      id: f['card-id'],
-      title: f['frame-name'],
-      varName: f['var-name'] || toVarName(f['frame-name']),
-      type: f['card-type'],
-      width: f.width,
-      height: f.height,
-      timeout: f.timeout,
-      status: 'idle',
-      endpoint: f.endpoint,
-      code,
-      sourceType: f['type-source'],
-      sourceName: f['type-name-source'],
-      httpMethod: f['http-method'] || ''
-    }
+  const [sourceType, sourceName = ''] = (f.source ?? 'inline').split('/');
+  const size = f.size?.split('x').map(Number) ?? [];
+  const card: Card = {
+    id: `${frame}/step-${stepNo}/${fileBase}`,
+    title: f.title,
+    varName: fileNameToVarName(fileBase),
+    type: f.type,
+    width: size[0] ?? DEFAULT_CARD_SIZE[f.type].width,
+    height: size[1] ?? DEFAULT_CARD_SIZE[f.type].height,
+    timeout: f.timeout ?? DEFAULT_TIMEOUT[f.type],
+    status: 'idle',
+    endpoint: f.endpoint ?? '',
+    code,
+    sourceType,
+    sourceName,
+    script: f.script,
+    httpMethod: ''
   };
+  card.httpMethod = endpointParts(card)?.method ?? '';
+
+  const warnings: string[] = [];
+  if (card.script) {
+    const script = findScript(sources, card);
+    if (!script) warnings.push(`script "${card.script}" not found in source ${f.source}`);
+    else if (!code.trim()) card.code = script.body.replace(/\n+$/, '');
+  }
+  return { ok: true, frame, stepNumber: Number(stepNo), phase: f.phase, order: f.order, card, warnings };
 };
 
-// Source .md files follow the frame contract.
-// Essential frontmatter: name-source, type-source, kind, project, base-url.
-// Custom queries live in scripts/{name}.md (one file per query, name = camelCase variable).
-// swagger sources rely on the spec (base-url) and therefore carry no scripts.
+// Groups the files returned by GET /api/v2/frames/{project} into frames and steps.
+// `sources` resolves cards that inherit their body from a source script.
+export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { frames: Frame[]; errors: string[] } => {
+  type Slot = { order: number; card: Card };
+  const byFrame = new Map<string, Map<number, { pre: Slot[]; post: Slot[] }>>();
+  const errors: string[] = [];
+
+  for (const file of files) {
+    const result = parseCardFile(file, sources);
+    if (!result.ok) {
+      errors.push(`${file.path}: ${result.errors.join('; ')}`);
+      continue;
+    }
+    result.warnings.forEach((w) => errors.push(`${file.path}: ${w}`));
+    const stepsOfFrame = byFrame.get(result.frame) ?? new Map();
+    byFrame.set(result.frame, stepsOfFrame);
+    const step = stepsOfFrame.get(result.stepNumber) ?? { pre: [], post: [] };
+    stepsOfFrame.set(result.stepNumber, step);
+    step[result.phase].push({ order: result.order, card: result.card });
+  }
+
+  const byOrder = (a: Slot, b: Slot) => a.order - b.order || (a.card.varName ?? '').localeCompare(b.card.varName ?? '');
+  const frames: Frame[] = [...byFrame.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, stepsOfFrame]) => ({
+      name,
+      steps: [...stepsOfFrame.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, s], idx) => ({
+          id: `step-${idx + 1}`,
+          number: idx + 1,
+          splitRatio: 48,
+          preCards: s.pre.sort(byOrder).map((e) => e.card),
+          postCards: s.post.sort(byOrder).map((e) => e.card)
+        }))
+    }));
+
+  return { frames, errors };
+};
+
+// The frame to show: the requested one when it exists, else the first on disk
+export const pickFrame = (frames: Frame[], preferred?: string): Frame | undefined =>
+  frames.find((f) => f.name === slug(preferred ?? '')) ?? frames[0];
+
+// --- SOURCES ---
+// public-data.md frontmatter holds base-url; private-data.md and scripts/{name}.md have an
+// empty frontmatter (reserved). swagger sources rely on the spec at base-url: no scripts.
 export type SourceKind = 'public-data' | 'private-data';
 
 export const hasScripts = (typeSource: string): boolean => typeSource !== 'swagger';
 
-export const sourceToMd = (
-  source: SourceDef,
-  kind: SourceKind,
-  project: string
-): string => {
-  const lines: string[] = [
-    FRAME_SEP,
-    `name-source: ${source.name}`,
-    `type-source: ${source.typeSource}`,
-    `kind: ${kind}`,
-    `project: ${project}`,
-    `base-url: ${source.baseUrl ?? ''}`,
-    BODY_SEP
-  ];
+export const sourceToMd = (source: SourceDef, kind: SourceKind): string =>
+  kind === 'public-data'
+    ? renderMd([['base-url', source.baseUrl?.trim() || undefined]], source.publicData)
+    : renderMd([], source.privateData);
 
-  const body = kind === 'public-data' ? source.publicData : source.privateData;
-  return `${lines.join('\n')}\n${body}\n`;
-};
+export const scriptToMd = (script: SourceScript): string => renderMd([], script.body);
 
-export const scriptToMd = (
-  source: Pick<SourceDef, 'name' | 'typeSource'>,
-  script: SourceScript,
-  project: string
-): string =>
-  [
-    FRAME_SEP,
-    `script-name: ${script.name}`,
-    `name-source: ${source.name}`,
-    `type-source: ${source.typeSource}`,
-    `project: ${project}`,
-    BODY_SEP,
-    script.body
-  ].join('\n') + '\n';
+export const parseScriptFile = (file: ScriptFile): SourceScript => ({
+  name: fileNameToVarName(file.file),
+  body: hasEnvelope(file.content) ? parseFrameMd(file.content).code : file.content // legacy plain file
+});
 
-export const parseScriptMd = (
-  content: string,
-  fallbackName: string
-): SourceScript => {
-  if (!content.startsWith(FRAME_SEP) || !content.includes(BODY_SEP)) {
-    return { name: fallbackName, body: content }; // legacy plain file
-  }
-  const { fields, code } = parseFrameMd(content);
-  const parsed = scriptFrontmatterSchema.safeParse(fields);
-  if (!parsed.success) return { name: fallbackName, body: content };
-  return { name: parsed.data['script-name'], body: code };
-};
-
-export const unwrapSourceMd = (content: string): { body: string; meta: SourceDef | null } => {
-  if (!content.startsWith(FRAME_SEP) || !content.includes(BODY_SEP)) {
-    return { body: content, meta: null }; // legacy plain .md: keep as-is
-  }
+export const unwrapSourceMd = (content: string): { body: string; baseUrl?: string } => {
+  if (!hasEnvelope(content)) return { body: content }; // legacy plain .md: keep as-is
   const { fields, code } = parseFrameMd(content);
   const parsed = sourceFrontmatterSchema.safeParse(fields);
-  if (!parsed.success) return { body: content, meta: null };
-  const f = parsed.data;
-  return {
-    body: code,
-    meta: {
-      name: f['name-source'],
-      typeSource: f['type-source'],
-      baseUrl: f['base-url'] || undefined,
-      publicData: '',
-      privateData: ''
-    }
-  };
+  return { body: code, baseUrl: parsed.success ? parsed.data['base-url'] || undefined : undefined };
 };
 
-// Envelope before POST /api/v2/sources: the server stores the .md files verbatim.
-// scripts/ is only written for source types that allow custom queries.
-export const wrapSourcesForSave = (project: string, sources: SourceDef[]): WrappedSource[] =>
+// Envelope before POST /api/v2/sources: the server stores the .md files verbatim and
+// prunes stale files inside each sent source directory.
+export const wrapSourcesForSave = (sources: SourceDef[]): WrappedSource[] =>
   sources.map((s) => ({
     typeSource: s.typeSource,
     name: s.name,
     baseUrl: s.baseUrl,
-    publicData: sourceToMd(s, 'public-data', project),
-    privateData: s.privateData.trim() ? sourceToMd(s, 'private-data', project) : '',
+    publicData: sourceToMd(s, 'public-data'),
+    privateData: s.privateData.trim() ? sourceToMd(s, 'private-data') : '',
     scripts: hasScripts(s.typeSource)
       ? (s.scripts ?? [])
           .filter((script) => script.body.trim())
           .map((script) => ({
             file: `${varNameToFileName(script.name)}.md`,
-            content: scriptToMd(s, script, project)
+            content: scriptToMd(script)
           }))
       : []
   }));
 
-// Reverse of wrapSourcesForSave after GET /api/v2/sources/{project}
+// Reverse of wrapSourcesForSave after GET /api/v2/sources/{project}; identity comes from the path
 export const unwrapSourcesFromLoad = (sources: RawSource[]): SourceDef[] =>
   sources.map((s) => {
-    const pub = unwrapSourceMd(s.publicData);
+    const pub = unwrapSourceMd(s.publicData ?? '');
     const priv = unwrapSourceMd(s.privateData ?? '');
-    const meta = pub.meta;
     return {
-      name: meta?.name ?? s.name,
-      typeSource: meta?.typeSource ?? s.typeSource,
-      baseUrl: meta?.baseUrl,
+      name: s.name,
+      typeSource: s.typeSource,
+      baseUrl: pub.baseUrl ?? priv.baseUrl,
       publicData: pub.body,
       privateData: priv.body,
-      scripts: (s.scripts ?? []).map((file) =>
-        parseScriptMd(file.content, file.file.replace(/\.md$/, ''))
-      )
+      scripts: (s.scripts ?? []).map(parseScriptFile)
     };
   });
 
@@ -385,39 +467,6 @@ export const substituteTemplates = (input: unknown, vars: Record<string, unknown
     );
   }
   return input;
-};
-
-export const rebuildSteps = (files: FrameFile[]): { steps: Step[]; errors: string[] } => {
-  const byStep = new Map<
-    string,
-    { number: number; pre: { order: number; card: Card }[]; post: { order: number; card: Card }[] }
-  >();
-  const errors: string[] = [];
-
-  for (const file of files) {
-    const result = frameMdToCard(file.content);
-    if (!result.ok) {
-      errors.push(`${file.path}: ${result.errors.join('; ')}`);
-      continue;
-    }
-    const { meta, card } = result;
-    if (!byStep.has(meta.stepId)) {
-      byStep.set(meta.stepId, { number: meta.stepNumber, pre: [], post: [] });
-    }
-    byStep.get(meta.stepId)![meta.phase].push({ order: meta.order, card });
-  }
-
-  const steps: Step[] = [...byStep.entries()]
-    .sort((a, b) => a[1].number - b[1].number)
-    .map(([id, s], idx) => ({
-      id,
-      number: idx + 1,
-      splitRatio: 48,
-      preCards: s.pre.sort((a, b) => a.order - b.order).map((e) => e.card),
-      postCards: s.post.sort((a, b) => a.order - b.order).map((e) => e.card)
-    }));
-
-  return { steps, errors };
 };
 
 export const defaultSources: SourceDef[] = [
@@ -496,12 +545,12 @@ Document shape (used by product-api):
     privateData: '',
     scripts: [
       {
-        name: 'obterProdutosAtivos',
+        name: 'getActiveProducts',
         body: `db.products.find({ ativo: true })
 `
       },
       {
-        name: 'obterProdutosPorCategoria',
+        name: 'getProductsByCategory',
         body: `db.products.find({ categoria: "Ferramentas" })
 `
       }
@@ -523,12 +572,17 @@ Functions: \`$sum\` \`$count\` \`$avg\` \`$min\` \`$max\` \`$length\` \`$number\
     privateData: '',
     scripts: [
       {
-        name: 'assertProdutosSoma',
+        name: 'assertOrderTotal',
         body: `assert $sum(Account.Order.Product.(Price * Quantity)) == 336.36
 `
       },
       {
-        name: 'assertProdutosQuantidade',
+        name: 'assertEchoProcessed',
+        body: `assert status == "PROCESSADO"
+`
+      },
+      {
+        name: 'assertOrderHasProducts',
         body: `assert $count(Account.Order.Product) >= 1
 `
       }

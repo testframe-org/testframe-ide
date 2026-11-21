@@ -10,15 +10,15 @@ All code comments and messages are in English.
 |---|---|
 | `GET /api/v2/health` | service status |
 | `POST /api/v2/echo` | generic target for in-test flow requests (201 with `request_id`) |
-| `POST /api/v2/frames` | writes the project's `.md` files |
+| `POST /api/v2/frames` | replaces frame directories (`{frame}/step-{n}/{var-file}.md`) |
 | `GET /api/v2/frames/{project}` | reads saved frames |
-| `POST /api/v2/sources` | writes sources (`public-data.md`/`private-data.md`) |
+| `POST /api/v2/sources` | replaces source directories (`public-data.md`/`private-data.md`/`scripts/*.md`) |
 | `GET /api/v2/sources/{project}` | reads sources |
 
 ## Structure
 
 - `controller/` — FrameworkController, FrameController, SourceController
-- `store/ProjectFileStore.java` — atomic writes (tmp + move) and **path sanitization** (strip `..`, character whitelist, `startsWith` guard). Keep these validations in any new endpoint that accepts a path.
+- `store/ProjectFileStore.java` — atomic writes (tmp + move), **path sanitization** (strip `..`, character whitelist, `startsWith` guard, `.md` only) and `replace(...)` (writes, then prunes stale `.md` files and empty dirs inside each scope; a scope can never be the `frames/`/`sources/` root). All paths are validated before anything is written. Keep these validations in any new endpoint that accepts a path. Format spec: `../docs/project-format.md`.
 - `config/WebConfig.java` — CORS with `allowedOriginPatterns("http://localhost:[*]")`
 - DTOs are `record`s under `dto/`
 

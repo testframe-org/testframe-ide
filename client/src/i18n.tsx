@@ -6,6 +6,7 @@ const en = {
   // Header
   suiteBadge: 'E2E Suite • Active',
   projectNameLabel: 'Project name',
+  frameNameLabel: 'Frame (flow) name',
   selectTool: 'Select & Resize (V)',
   handTool: 'Pan Canvas (Hold Space)',
   zoomOut: 'Zoom out',
@@ -39,13 +40,13 @@ const en = {
   logOk: 'OK',
   logAssertFail: 'FAILED assertion',
   logStep: '[Step {n}]',
-  framesSaved: '{n} frames saved to {root}',
+  framesSaved: '{n} cards saved to {root}',
   framesSaveFail: 'Failed to save frames: {msg}',
   framesLoadFail: 'Failed to load frames: {msg}',
   noFramesSaved: 'No frames saved in this project yet',
   framesInvalid: 'Invalid frames: {msg}',
   stepsLoaded: 'Flow loaded successfully: {n} steps',
-  stepsLoadedWarn: '{n} steps loaded ({m} frames skipped due to invalid schema)',
+  stepsLoadedWarn: '{n} steps loaded ({m} card files with problems)',
 
   // Step frame
   stepWord: 'Step',
@@ -120,7 +121,6 @@ const en = {
   defaultRequestTitle: 'New Action / Request',
   defaultAssertionTitle: 'New JSON Assertion',
   defaultJsonResultTitle: 'JSON Result',
-  defaultSchemaEndpoint: 'Validation Schema',
   defaultStepTitle: 'Run validation on step {n}',
 
   // Scripts editor (sources scripts/{name}.md)
@@ -128,6 +128,8 @@ const en = {
   removeScript: 'Remove script',
   scriptsHint: 'One file per custom query: scripts/{name}.md',
   noScripts: 'No scripts on this source.',
+  scriptField: 'Source script',
+  scriptNone: '(inline code)',
   varNameField: 'Variable name (var-name)'
 } as const;
 
@@ -136,6 +138,7 @@ export type TKey = keyof typeof en;
 const pt: Record<TKey, string> = {
   suiteBadge: 'Suíte E2E • Ativo',
   projectNameLabel: 'Nome do projeto',
+  frameNameLabel: 'Nome do frame (fluxo)',
   selectTool: 'Selecionar e Redimensionar (V)',
   handTool: 'Arrastar Canvas (Segure Espaço)',
   zoomOut: 'Diminuir Zoom',
@@ -168,13 +171,13 @@ const pt: Record<TKey, string> = {
   logOk: 'OK',
   logAssertFail: 'FALHOU na asserção',
   logStep: '[Etapa {n}]',
-  framesSaved: '{n} frames salvos em {root}',
+  framesSaved: '{n} cards salvos em {root}',
   framesSaveFail: 'Falha ao salvar frames: {msg}',
   framesLoadFail: 'Falha ao carregar frames: {msg}',
   noFramesSaved: 'Nenhum frame salvo neste projeto ainda',
   framesInvalid: 'Frames inválidos: {msg}',
   stepsLoaded: 'Fluxo carregado com sucesso: {n} etapas',
-  stepsLoadedWarn: '{n} etapas carregadas ({m} frames ignorados por schema inválido)',
+  stepsLoadedWarn: '{n} etapas carregadas ({m} arquivos de card com problemas)',
 
   stepWord: 'Etapa',
   blocksOne: '{n} bloco',
@@ -244,13 +247,14 @@ const pt: Record<TKey, string> = {
   defaultRequestTitle: 'Nova Ação / Request',
   defaultAssertionTitle: 'Nova Asserção JSON',
   defaultJsonResultTitle: 'Resultado em JSON',
-  defaultSchemaEndpoint: 'Validação Schema',
   defaultStepTitle: 'Executar validação na etapa {n}',
 
   addScript: 'Adicionar script',
   removeScript: 'Remover script',
   scriptsHint: 'Um arquivo por query custom: scripts/{name}.md',
   noScripts: 'Nenhum script nesta source.',
+  scriptField: 'Script da source',
+  scriptNone: '(código inline)',
   varNameField: 'Nome da variável (var-name)'
 };
 

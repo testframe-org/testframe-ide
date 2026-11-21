@@ -25,8 +25,9 @@ export const testframeApi = {
   echo: (payload: unknown) =>
     requestJson<Record<string, unknown>>('/api/v2/echo', json('POST', payload)),
 
-  saveFrames: (project: string, files: FrameFile[]) =>
-    requestJson<FramesSaveResponse>('/api/v2/frames', json('POST', { project, files })),
+  // Replaces frames/{frame}/ with `files` (paths relative to frames/, e.g. main/step-1/x.md)
+  saveFrames: (project: string, frame: string, files: FrameFile[]) =>
+    requestJson<FramesSaveResponse>('/api/v2/frames', json('POST', { project, frame, files })),
 
   loadFrames: (project: string) =>
     requestJson<FramesLoadResponse>(`/api/v2/frames/${encodeURIComponent(project)}`),

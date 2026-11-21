@@ -1,8 +1,4 @@
 -------------------
-name-source: products-db
-type-source: mongo
-kind: public-data
-project: product-test
 base-url: mongodb://localhost:27017/products
 --------body----------
 # products collection
@@ -18,4 +14,3 @@ Document shape (used by product-api):
   "ativo": "boolean"
 }
 ```
-

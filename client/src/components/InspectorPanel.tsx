@@ -9,7 +9,7 @@ import {
   Trash2,
   XCircle
 } from 'lucide-react';
-import { HTTP_METHODS, SOURCE_TYPES, endpointParts, toVarName } from '../frames';
+import { HTTP_METHODS, SOURCE_TYPES, cardVarName, endpointParts, normalizeVarName } from '../frames';
 import { useI18n } from '../i18n';
 import type { Card, CardType, SelectedContext, SourceDef } from '../types';
 
@@ -88,9 +88,9 @@ export function InspectorPanel({
               <label className="block text-xs font-medium text-slate-600 mb-1">{t('varNameField')}</label>
               <input
                 type="text"
-                value={selectedContext.card.varName ?? toVarName(selectedContext.card.title)}
-                onChange={(e) => onUpdateCard(selectedContext.card.id, { varName: toVarName(e.target.value) })}
-                placeholder="obterProdutosAtivos"
+                value={cardVarName(selectedContext.card)}
+                onChange={(e) => onUpdateCard(selectedContext.card.id, { varName: normalizeVarName(e.target.value) })}
+                placeholder="getActiveProducts"
                 className="w-full text-xs font-mono text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:border-blue-500 outline-none"
               />
             </div>
@@ -228,7 +228,7 @@ export function InspectorPanel({
               <label className="block text-xs font-medium text-slate-600 mb-1">type-source</label>
               <select
                 value={selectedContext.card.sourceType || 'inline'}
-                onChange={(e) => onUpdateCard(selectedContext.card.id, { sourceType: e.target.value })}
+                onChange={(e) => onUpdateCard(selectedContext.card.id, { sourceType: e.target.value, script: undefined })}
                 className="w-full text-xs font-mono text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:border-blue-500 outline-none"
               >
                 {SOURCE_TYPES.map((type) => (
@@ -243,7 +243,7 @@ export function InspectorPanel({
                 list="sources-names"
                 type="text"
                 value={selectedContext.card.sourceName || ''}
-                onChange={(e) => onUpdateCard(selectedContext.card.id, { sourceName: e.target.value })}
+                onChange={(e) => onUpdateCard(selectedContext.card.id, { sourceName: e.target.value, script: undefined })}
                 placeholder={t('sourceNamePlaceholder')}
                 className="w-full text-xs font-mono text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:border-blue-500 outline-none"
               />
@@ -253,6 +253,36 @@ export function InspectorPanel({
                 ))}
               </datalist>
             </div>
+
+            {(() => {
+              // script: reuse a custom query/method of the card's source (body inherited on disk)
+              const card = selectedContext.card;
+              const source = sources.find((s) => s.typeSource === card.sourceType && s.name === card.sourceName);
+              const scripts = source?.scripts ?? [];
+              if (!scripts.length && !card.script) return null;
+              return (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">{t('scriptField')}</label>
+                  <select
+                    value={card.script ?? ''}
+                    onChange={(e) => {
+                      const name = e.target.value || undefined;
+                      const script = scripts.find((s) => s.name === name);
+                      onUpdateCard(card.id, script ? { script: name, code: script.body.replace(/\n+$/, '') } : { script: name });
+                    }}
+                    className="w-full text-xs font-mono text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:border-blue-500 outline-none"
+                  >
+                    <option value="">{t('scriptNone')}</option>
+                    {card.script && !scripts.some((s) => s.name === card.script) && (
+                      <option value={card.script}>{card.script} (?)</option>
+                    )}
+                    {scripts.map((s) => (
+                      <option key={s.name} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })()}
 
             {selectedContext.card.type === 'request' && (
               <div>

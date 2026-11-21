@@ -17,6 +17,7 @@ export interface Card {
   code: string;
   sourceType: string;
   sourceName: string;
+  script?: string; // camelCase name of a script of the card's source; empty body on disk = inherit it
   httpMethod: string;
 }
 
@@ -94,6 +95,12 @@ export interface FramesSaveResponse {
   project: string;
   root: string;
   saved: number;
+}
+
+// One flow on the canvas: frames/{name}/step-{n}/{var-file}.md
+export interface Frame {
+  name: string; // kebab-case directory name
+  steps: Step[];
 }
 
 export interface FramesLoadResponse {

@@ -11,6 +11,7 @@ server (Spring Boot) that persists test projects as markdown.
 | `server/` | Spring Boot framework server: frames/sources persistence, echo, assertions |
 | `scripts/` | Parameter-driven runners (all settings arrive as `--key=value`) |
 | `examples/` | Example projects, each a self-contained suite with its own README |
+| `docs/project-format.md` | On-disk project format (frames/sources layout, frontmatter, bindings) |
 
 Ports: server 18080, client 15173 (defaults documented in the root
 `package.json > config` - the repo-root `scripts/` resolve them and pass

@@ -33,7 +33,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
   };
 
   const addScript = () => {
-    const next = [...(current.scripts ?? []), { name: `novoScript${(current.scripts?.length ?? 0) + 1}`, body: '' }];
+    const next = [...(current.scripts ?? []), { name: `newScript${(current.scripts?.length ?? 0) + 1}`, body: '' }];
     updateCurrent({ scripts: next });
   };
 
@@ -45,7 +45,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
     setSources((prev) => {
       const next = [
         ...prev,
-        { typeSource: 'restapi', name: `nova-source-${prev.length + 1}`, publicData: '', privateData: '', scripts: [] }
+        { typeSource: 'restapi', name: `new-source-${prev.length + 1}`, publicData: '', privateData: '', scripts: [] }
       ];
       setSelectedIndex(next.length - 1);
       return next;
@@ -77,7 +77,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
     if (!validate()) return;
     setSaving(true);
     try {
-      const data = await testframeApi.saveSources(project, wrapSourcesForSave(project, sources));
+      const data = await testframeApi.saveSources(project, wrapSourcesForSave(sources));
       onLog?.(t('savedSources', { n: data.saved, root: data.root }), 'success');
     } catch (err) {
       onLog?.(t('savedSourcesFail', { msg: (err as Error).message }), 'error');

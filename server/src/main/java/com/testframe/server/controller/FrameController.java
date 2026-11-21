@@ -1,5 +1,6 @@
 package com.testframe.server.controller;
 
+import com.testframe.server.dto.FrameFile;
 import com.testframe.server.dto.SaveFramesRequest;
 import com.testframe.server.store.ProjectFileStore;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -10,7 +11,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequestMapping("/api/v2/frames")
@@ -24,7 +28,17 @@ public class FrameController {
 
     @PostMapping
     public Map<String, Object> save(@RequestBody SaveFramesRequest request) throws IOException {
-        return store.save(request.project(), "testframe/frames", request.files());
+        List<FrameFile> files = request.files() == null ? List.of() : request.files();
+        Set<String> frames = new LinkedHashSet<>();
+        if (request.frame() != null && !request.frame().isBlank()) {
+            frames.add(request.frame());
+        }
+        for (FrameFile file : files) {
+            String path = file.path() == null ? "" : file.path().replace('\\', '/');
+            int slash = path.indexOf('/');
+            frames.add(slash > 0 ? path.substring(0, slash) : path);
+        }
+        return store.replace(request.project(), "testframe/frames", frames, files);
     }
 
     @GetMapping("/{project}")

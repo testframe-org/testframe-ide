@@ -30,9 +30,12 @@ public class SourceController {
 
     @PostMapping
     public Map<String, Object> save(@RequestBody SaveSourcesRequest request) throws IOException {
+        // Each sent source directory is replaced: removed scripts / private-data do not linger
         List<FrameFile> files = new ArrayList<>();
+        List<String> scopes = new ArrayList<>();
         for (SourceDefinition source : request.sources()) {
             String base = "%s/%s".formatted(source.typeSource(), source.name());
+            scopes.add(base);
             if (source.publicData() != null && !source.publicData().isBlank()) {
                 files.add(new FrameFile("%s/public-data.md".formatted(base), source.publicData()));
             }
@@ -45,7 +48,7 @@ public class SourceController {
                 }
             }
         }
-        return store.save(request.project(), "testframe/sources", files);
+        return store.replace(request.project(), "testframe/sources", scopes, files);
     }
 
     @GetMapping("/{project}")

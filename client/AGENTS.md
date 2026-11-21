@@ -13,13 +13,13 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   calls outside this folder except card-driven target dispatch.
 - `src/components/` — `StepFrame`, `TestBlockCard`, `ConnectorArrow`, `AddBlockCircleButton`,
   `InspectorPanel`, `ExecutionConsole`, `SourcesModal` (source CRUD incl. `scripts/` editor)
-- `src/frames.ts` — **persistence contract**: frame/source `.md` serialization/parsing + zod
-  schemas (`frontmatterSchema`, `sourceSchema`, `sourceFrontmatterSchema`) +
-  `buildFrameFiles`/`rebuildSteps` + `wrapSourcesForSave`/`unwrapSourcesFromLoad` (sources
-  stored as frontmatter + body; custom queries as `scripts/{name}.md`; swagger sources carry
-  no scripts) + variable helpers (`toVarName`, `varNameToFileName`, `substituteTemplates`
-  for `{{varName.path}}` bindings between steps). Changes here must stay in sync with what
-  the server stores (`modules/testframe-ide/server/store/ProjectFileStore.java`).
+- `src/frames.ts` — **persistence contract** (spec: `../docs/project-format.md`): card/source
+  `.md` serialization + zod schemas (`cardFrontmatterSchema`, `sourceSchema`) +
+  `buildFrameFiles(frame, steps, sources)` / `rebuildFrames(files, sources)` / `pickFrame` +
+  `wrapSourcesForSave` / `unwrapSourcesFromLoad` + name helpers (`normalizeVarName`,
+  `varNameToFileName`, `fileNameToVarName`) + `substituteTemplates` for `{{varName.path}}`
+  bindings. Identity (frame, step, var-name, source, script) comes from the path only.
+  Changes here must stay in sync with the server (`server/.../store/ProjectFileStore.java`).
 - `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `ScriptFile`, `RawSource`, `HttpResult`...)
 
 ## Commands
@@ -40,7 +40,9 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
   matches `METHOD /path`; validation cards starting with `assert` execute live against
   `POST /api/v2/assertions`; responses feed the step's JSON result card and publish
   variables named after each card's `var-name`.
-- Frame file names come from the card `var-name` (camelCase, kebab on disk).
+- Card files are `frames/{frame}/step-{n}/{var-file}.md` (var-name camelCase, kebab on disk,
+  unique per frame). The header edits the frame name; cards bound to a source `script` keep
+  an empty body on disk while they match it. Default var-names are English identifiers.
 - Project name defaults to `VITE_PROJECT` (fallback `product-test`); the storage directory
   is always `slug(projectName)`. The app starts empty and auto-loads saved frames/sources.
 - Keep the Figma look (ring per status, inspector on the right, floating console).
