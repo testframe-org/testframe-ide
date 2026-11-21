@@ -3,3 +3,6 @@ dist/
 target/
 .crush/
 *.log
+
+# Private project data (versioned templates are *.private.example.md)
+*.private.md

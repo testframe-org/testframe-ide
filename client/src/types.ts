@@ -18,6 +18,7 @@ export interface Card {
   sourceType: string;
   sourceName: string;
   script?: string; // camelCase name of a script of the card's source; empty body on disk = inherit it
+  privateData?: string; // body of {var-file}.private.md (gitignored; falls back to .private.example.md)
   httpMethod: string;
 }
 

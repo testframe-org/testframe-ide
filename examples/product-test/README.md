@@ -28,7 +28,7 @@ first time the collection is empty.
 ## The suite
 
 1. Step 1 runs the `mongo` script `getActiveProducts` (card `getActiveProducts`
-   references `sources/mongo/products-db/scripts/get-active-products.md`) and
+   references `sources/mongo/products-db/get-active-products.md`) and
    publishes the result as the `getActiveProducts` variable.
 2. Step 2 binds `{{getActiveProducts.0.nome}}` into a payload, sends it to
    the framework `POST /api/v2/echo`, and asserts the response with

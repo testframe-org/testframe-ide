@@ -31,8 +31,11 @@ public class ProjectFileStore {
         this.root = Path.of(projectsDir).toAbsolutePath().normalize();
     }
 
+    /** Versioned templates for private files ({@code <name>.private.example.md}): never pruned by a save. */
+    public static final String PRIVATE_EXAMPLE_SUFFIX = ".private.example.md";
+
     public Map<String, Object> save(String project, String subDir, List<FrameFile> files) throws IOException {
-        return replace(project, subDir, List.of(), files);
+        return replace(project, subDir, List.of(), List.of(), files);
     }
 
     /**
@@ -40,9 +43,11 @@ public class ProjectFileStore {
      * {@code .md} file inside each of the {@code scopes} directories, so each scope ends up
      * holding exactly what was sent. Scopes are relative to {@code subDir} and must be strict
      * sub-directories of it (a scope can never wipe the whole frames/sources tree).
+     * {@code staleFiles} are single files (outside the scopes) deleted unless they were sent.
+     * {@code *.private.example.md} templates are never deleted.
      */
     public Map<String, Object> replace(String project, String subDir, Collection<String> scopes,
-                                       List<FrameFile> files) throws IOException {
+                                       Collection<String> staleFiles, List<FrameFile> files) throws IOException {
         Path dir = resolve(project).resolve(subDir);
 
         // Validate every path before touching the disk
@@ -62,6 +67,14 @@ public class ProjectFileStore {
             }
             scopeDirs.add(scopeDir);
         }
+        List<Path> stalePaths = new ArrayList<>();
+        for (String stale : new LinkedHashSet<>(staleFiles)) {
+            Path stalePath = resolve(stale, dir);
+            if (!stalePath.getFileName().toString().endsWith(".md")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only .md files can be removed: " + stale);
+            }
+            stalePaths.add(stalePath);
+        }
 
         for (Map.Entry<Path, String> entry : targets.entrySet()) {
             Path target = entry.getKey();
@@ -74,6 +87,11 @@ public class ProjectFileStore {
         int removed = 0;
         for (Path scopeDir : scopeDirs) {
             removed += prune(scopeDir, targets.keySet());
+        }
+        for (Path stale : stalePaths) {
+            if (!targets.containsKey(stale) && !isPrivateExample(stale) && Files.deleteIfExists(stale)) {
+                removed++;
+            }
         }
 
         return Map.of("project", project, "root", dir.toString(), "saved", targets.size(), "removed", removed);
@@ -90,7 +108,7 @@ public class ProjectFileStore {
             all = walk.sorted(Comparator.reverseOrder()).toList(); // children before parents
         }
         for (Path p : all) {
-            if (Files.isRegularFile(p) && p.toString().endsWith(".md") && !keep.contains(p)) {
+            if (Files.isRegularFile(p) && p.toString().endsWith(".md") && !keep.contains(p) && !isPrivateExample(p)) {
                 Files.delete(p);
                 removed++;
             } else if (Files.isDirectory(p) && isEmpty(p)) {
@@ -98,6 +116,10 @@ public class ProjectFileStore {
             }
         }
         return removed;
+    }
+
+    private static boolean isPrivateExample(Path p) {
+        return p.getFileName().toString().endsWith(PRIVATE_EXAMPLE_SUFFIX);
     }
 
     private static boolean isEmpty(Path directory) throws IOException {

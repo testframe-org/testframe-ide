@@ -18,10 +18,14 @@ import type {
 // PROJECT FORMAT (see modules/testframe-ide/docs/project-format.md)
 //
 //   {project}/testframe/
-//     frames/{frame}/step-{n}/{var-file}.md         one card; var-name = camelCase(var-file)
-//     sources/{type}/{name}/public-data.md           base-url + docs
-//     sources/{type}/{name}/private-data.md          optional, never carries base-url
-//     sources/{type}/{name}/scripts/{script-file}.md one custom query/method; name = camelCase(script-file)
+//     frames/{frame}/step-{n}/{var-file}.md          one card; var-name = camelCase(var-file)
+//     frames/{frame}/step-{n}/{var-file}.private.md  optional private data of that card
+//     sources/{type}/{name}.md                        base-url + docs
+//     sources/{type}/{name}.private.md                optional private data, never carries base-url
+//     sources/{type}/{name}/{script-file}.md          one custom query/method; name = camelCase(script-file)
+//
+//   *.private.md files are gitignored; a versioned *.private.example.md next to them is the
+//   template loaded when the private file is missing (the server never deletes templates).
 //
 // Identity (frame, step number, var-name, source type/name, script name) always comes
 // from the path. Frontmatter stores only what the path cannot express.
@@ -130,8 +134,7 @@ export const sourceSchema = z.object({
     .default([])
 });
 
-// public-data.md: the only source fact the path cannot express. Unknown keys from the
-// legacy format (name-source, type-source, kind, project) are ignored on load.
+// {name}.md frontmatter: base-url is the only source fact the path cannot express.
 const sourceFrontmatterSchema = z.object({
   'base-url': z.string().optional()
 });
@@ -140,6 +143,10 @@ const SOURCE_REF_RE = /^([a-z]+)(?:\/([a-z0-9][a-z0-9._-]*))?$/i;
 
 // frames/{frame}/step-{n}/{var-file}.md
 const FRAME_PATH_RE = /^([a-z0-9][a-z0-9-]*)\/step-(\d+)\/([a-z0-9][a-z0-9-]*)\.md$/;
+// frames/{frame}/step-{n}/{var-file}.private.md | .private.example.md
+const PRIVATE_PATH_RE = /^([a-z0-9][a-z0-9-]*\/step-\d+\/[a-z0-9][a-z0-9-]*)\.private(\.example)?\.md$/;
+export const PRIVATE_SUFFIX = '.private.md';
+export const PRIVATE_EXAMPLE_SUFFIX = '.private.example.md';
 
 export const cardFrontmatterSchema = z
   .object({
@@ -191,8 +198,6 @@ export const parseFrameMd = (md: string): { fields: Record<string, string>; code
   }
   return { fields, code };
 };
-
-const hasEnvelope = (content: string): boolean => content.startsWith(FRAME_SEP) && content.includes(BODY_SEP);
 
 const renderMd = (fields: [string, string | number | undefined][], body: string): string => {
   const lines = [FRAME_SEP];
@@ -264,10 +269,14 @@ export const buildFrameFiles = (frame: string, steps: Step[], sources: SourceDef
           throw new Error(`var-name "${varName}" is used twice (${seen.get(varName)} and ${where})`);
         }
         seen.set(varName, where);
+        const base = `${frameDir}/step-${stepIdx + 1}/${varNameToFileName(varName)}`;
         files.push({
-          path: `${frameDir}/step-${stepIdx + 1}/${varNameToFileName(varName)}.md`,
+          path: `${base}.md`,
           content: cardToMd(card, phaseKey === 'preCards' ? 'pre' : 'post', idx + 1, sources)
         });
+        if (card.privateData?.trim()) {
+          files.push({ path: `${base}${PRIVATE_SUFFIX}`, content: renderMd([], card.privateData) });
+        }
       });
     }
   });
@@ -329,18 +338,45 @@ export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { 
   const byFrame = new Map<string, Map<number, { pre: Slot[]; post: Slot[] }>>();
   const errors: string[] = [];
 
+  // Private files first: {base} -> body, a real .private.md wins over its .private.example.md
+  const privates = new Map<string, { body: string; example: boolean }>();
+  const cardFiles: FrameFile[] = [];
   for (const file of files) {
+    const m = file.path.match(PRIVATE_PATH_RE);
+    if (!m) {
+      cardFiles.push(file);
+      continue;
+    }
+    const example = !!m[2];
+    const current = privates.get(m[1]);
+    if (!current || (current.example && !example)) {
+      privates.set(m[1], { body: parseFrameMd(file.content).code, example });
+    }
+  }
+  const claimed = new Set<string>();
+
+  for (const file of cardFiles) {
     const result = parseCardFile(file, sources);
     if (!result.ok) {
       errors.push(`${file.path}: ${result.errors.join('; ')}`);
       continue;
     }
     result.warnings.forEach((w) => errors.push(`${file.path}: ${w}`));
+    const base = file.path.replace(/\.md$/, '');
+    const priv = privates.get(base);
+    if (priv) {
+      result.card.privateData = priv.body;
+      claimed.add(base);
+    }
     const stepsOfFrame = byFrame.get(result.frame) ?? new Map();
     byFrame.set(result.frame, stepsOfFrame);
     const step = stepsOfFrame.get(result.stepNumber) ?? { pre: [], post: [] };
     stepsOfFrame.set(result.stepNumber, step);
     step[result.phase].push({ order: result.order, card: result.card });
+  }
+
+  for (const base of privates.keys()) {
+    if (!claimed.has(base)) errors.push(`${base}: private data without a card (${base}.md missing)`);
   }
 
   const byOrder = (a: Slot, b: Slot) => a.order - b.order || (a.card.varName ?? '').localeCompare(b.card.varName ?? '');
@@ -367,14 +403,14 @@ export const pickFrame = (frames: Frame[], preferred?: string): Frame | undefine
   frames.find((f) => f.name === slug(preferred ?? '')) ?? frames[0];
 
 // --- SOURCES ---
-// public-data.md frontmatter holds base-url; private-data.md and scripts/{name}.md have an
+// {name}.md frontmatter holds base-url; {name}.private.md and {name}/{script}.md have an
 // empty frontmatter (reserved). swagger sources rely on the spec at base-url: no scripts.
-export type SourceKind = 'public-data' | 'private-data';
+export type SourceKind = 'public' | 'private';
 
 export const hasScripts = (typeSource: string): boolean => typeSource !== 'swagger';
 
 export const sourceToMd = (source: SourceDef, kind: SourceKind): string =>
-  kind === 'public-data'
+  kind === 'public'
     ? renderMd([['base-url', source.baseUrl?.trim() || undefined]], source.publicData)
     : renderMd([], source.privateData);
 
@@ -382,25 +418,24 @@ export const scriptToMd = (script: SourceScript): string => renderMd([], script.
 
 export const parseScriptFile = (file: ScriptFile): SourceScript => ({
   name: fileNameToVarName(file.file),
-  body: hasEnvelope(file.content) ? parseFrameMd(file.content).code : file.content // legacy plain file
+  body: parseFrameMd(file.content).code
 });
 
 export const unwrapSourceMd = (content: string): { body: string; baseUrl?: string } => {
-  if (!hasEnvelope(content)) return { body: content }; // legacy plain .md: keep as-is
   const { fields, code } = parseFrameMd(content);
   const parsed = sourceFrontmatterSchema.safeParse(fields);
   return { body: code, baseUrl: parsed.success ? parsed.data['base-url'] || undefined : undefined };
 };
 
-// Envelope before POST /api/v2/sources: the server stores the .md files verbatim and
-// prunes stale files inside each sent source directory.
+// Envelope before POST /api/v2/sources: the server stores the .md files verbatim as
+// {type}/{name}.md, {type}/{name}.private.md and {type}/{name}/{script}.md, pruning stale ones.
 export const wrapSourcesForSave = (sources: SourceDef[]): WrappedSource[] =>
   sources.map((s) => ({
     typeSource: s.typeSource,
     name: s.name,
     baseUrl: s.baseUrl,
-    publicData: sourceToMd(s, 'public-data'),
-    privateData: s.privateData.trim() ? sourceToMd(s, 'private-data') : '',
+    publicData: sourceToMd(s, 'public'),
+    privateData: s.privateData.trim() ? sourceToMd(s, 'private') : '',
     scripts: hasScripts(s.typeSource)
       ? (s.scripts ?? [])
           .filter((script) => script.body.trim())

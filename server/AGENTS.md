@@ -12,7 +12,7 @@ All code comments and messages are in English.
 | `POST /api/v2/echo` | generic target for in-test flow requests (201 with `request_id`) |
 | `POST /api/v2/frames` | replaces frame directories (`{frame}/step-{n}/{var-file}.md`) |
 | `GET /api/v2/frames/{project}` | reads saved frames |
-| `POST /api/v2/sources` | replaces source directories (`public-data.md`/`private-data.md`/`scripts/*.md`) |
+| `POST /api/v2/sources` | replaces sources (`{type}/{name}.md`, `{name}.private.md`, `{name}/{script}.md`) |
 | `GET /api/v2/sources/{project}` | reads sources |
 
 ## Structure

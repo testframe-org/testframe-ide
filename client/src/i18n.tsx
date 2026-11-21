@@ -88,6 +88,8 @@ const en = {
   manageSources: 'Manage sources',
   sourceNamePlaceholder: 'e.g.: framework-echo-api',
   timeoutLabel: 'Timeout (ms)',
+  privateDataLabel: 'Private data',
+  privateDataHint: 'Secrets for this card (saved to .private.md, not versioned)',
   lastRunStatus: 'Last Run Status',
   statusSuccess: 'Success (valid assertion)',
   statusError: 'Execution failed',
@@ -123,10 +125,10 @@ const en = {
   defaultJsonResultTitle: 'JSON Result',
   defaultStepTitle: 'Run validation on step {n}',
 
-  // Scripts editor (sources scripts/{name}.md)
+  // Scripts editor (sources {name}/{script}.md)
   addScript: 'Add script',
   removeScript: 'Remove script',
-  scriptsHint: 'One file per custom query: scripts/{name}.md',
+  scriptsHint: 'One file per custom query: {source}/{script}.md',
   noScripts: 'No scripts on this source.',
   scriptField: 'Source script',
   scriptNone: '(inline code)',
@@ -216,6 +218,8 @@ const pt: Record<TKey, string> = {
   manageSources: 'Gerenciar sources',
   sourceNamePlaceholder: 'ex.: framework-echo-api',
   timeoutLabel: 'Timeout (ms)',
+  privateDataLabel: 'Dados privados',
+  privateDataHint: 'Segredos deste card (salvos em .private.md, fora do versionamento)',
   lastRunStatus: 'Status da Última Execução',
   statusSuccess: 'Sucesso (Asserção Válida)',
   statusError: 'Falha na Execução',
@@ -251,7 +255,7 @@ const pt: Record<TKey, string> = {
 
   addScript: 'Adicionar script',
   removeScript: 'Remover script',
-  scriptsHint: 'Um arquivo por query custom: scripts/{name}.md',
+  scriptsHint: 'Um arquivo por query custom: {source}/{script}.md',
   noScripts: 'Nenhum script nesta source.',
   scriptField: 'Script da source',
   scriptNone: '(código inline)',

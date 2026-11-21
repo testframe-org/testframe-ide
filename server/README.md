@@ -12,7 +12,7 @@ here (example APIs belong in `../../examples/*/examples-components/`).
 | `POST /api/v2/echo` | generic request target for flows under test (201 + request_id) |
 | `POST /api/v2/assertions` | evaluates the assertion mini-language (engine: `jsonassert-java` (`io.github.jsonassert`)) |
 | `POST /api/v2/frames` / `GET /api/v2/frames/{project}` | replace/read frame directories (`{frame}/step-{n}/{var-file}.md`) |
-| `POST /api/v2/sources` / `GET /api/v2/sources/{project}` | replace/read source directories + `scripts/{name}.md` |
+| `POST /api/v2/sources` / `GET /api/v2/sources/{project}` | replace/read sources (`{type}/{name}.md`, `.private.md`, `{name}/{script}.md`) |
 
 On-disk format: `../docs/project-format.md`.
 

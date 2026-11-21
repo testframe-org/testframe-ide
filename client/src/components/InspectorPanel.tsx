@@ -338,6 +338,18 @@ export function InspectorPanel({
               />
             </div>
 
+            {/* Private data: saved to {var-file}.private.md (gitignored) */}
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">{t('privateDataLabel')}</label>
+              <textarea
+                value={selectedContext.card.privateData ?? ''}
+                onChange={(e) => onUpdateCard(selectedContext.card.id, { privateData: e.target.value })}
+                placeholder={t('privateDataHint')}
+                rows={3}
+                className="w-full text-xs font-mono text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:bg-white focus:border-blue-500 outline-none resize-y"
+              />
+            </div>
+
             {/* Last run status */}
             <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5">
               <span className="text-[11px] font-semibold text-slate-500 block">

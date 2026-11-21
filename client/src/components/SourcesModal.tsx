@@ -221,7 +221,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
             <div className="flex-1 flex flex-col gap-3 p-4 min-h-0 overflow-y-auto">
               <label className="flex flex-col gap-1 min-h-[120px]">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  public-data.md{' '}
+                  {current.name || '{name}'}.md{' '}
                   <span className="normal-case font-normal text-slate-400">{t('publicDataDesc')}</span>
                 </span>
                 <textarea
@@ -235,7 +235,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
 
               <label className="flex flex-col gap-1 min-h-[90px]">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  private-data.md{' '}
+                  {current.name || '{name}'}.private.md{' '}
                   <span className="normal-case font-normal text-slate-400">{t('privateDataDesc')}</span>
                 </span>
                 <textarea
@@ -247,7 +247,7 @@ export function SourcesModal({ open, onClose, project, sources, setSources, onLo
                 />
               </label>
 
-              {/* scripts/{name}.md — custom queries (swagger sources rely on the spec instead) */}
+              {/* {name}/{script}.md — custom queries (swagger sources rely on the spec instead) */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">

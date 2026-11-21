@@ -38,7 +38,7 @@ public class FrameController {
             int slash = path.indexOf('/');
             frames.add(slash > 0 ? path.substring(0, slash) : path);
         }
-        return store.replace(request.project(), "testframe/frames", frames, files);
+        return store.replace(request.project(), "testframe/frames", frames, List.of(), files);
     }
 
     @GetMapping("/{project}")
