@@ -1,32 +1,32 @@
-# React + TypeScript + Vite
+# product-web
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Example UI for the product-test suite: Vite + React + TypeScript catalog of
+the products exposed by `product-api`. It exercises the same source the
+`swagger` entry describes.
 
-Currently, two official plugins are available:
+## Running
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+```bash
+bun run product-test --web-only   # from repo root (port 15174)
+# or directly:
+bun install && bun run dev        # CLIENT_PORT / API_PORT envs configure it
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The dev server proxies `/api` to the API (`API_PORT`, default 18081).
+
+## What it does
+
+- lists products (price in BRL, active/inactive badges)
+- creates products via the form (POST)
+- toggles `ativo` (re-POST with the doc) and deletes (DELETE)
+- centralizes all calls in a typed `api<T>()` helper; errors show in a banner
+
+## Commands
+
+```bash
+bun run typecheck
+bun run build
+```
+
+Rules in `../product-api/AGENTS.md` and the project-level `AGENTS.md`
+(`../../AGENTS.md`).
