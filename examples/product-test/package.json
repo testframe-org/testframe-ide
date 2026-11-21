@@ -1,0 +1,15 @@
+{
+  "name": "product-test",
+  "private": true,
+  "type": "module",
+  "description": "Example project: product-api (Spring Boot 4 + Mongo + Swagger) and product-web (Vite React TS). Ports live in the repo-root package.json > config.examples['product-test'].",
+  "scripts": {
+    "dev": "bun scripts/dev.ts",
+    "dev:api": "bun scripts/dev.ts --api-only",
+    "dev:web": "bun scripts/dev.ts --web-only",
+    "dev:full": "bun ../../modules/testframe-ide/scripts/example.ts .",
+    "build": "bun run build:api && bun run build:web",
+    "build:api": "cd examples-components/product-api && ./mvnw -q -DskipTests package",
+    "build:web": "cd examples-components/product-web && bun install --frozen-lockfile=false && bun run build"
+  }
+}
