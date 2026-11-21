@@ -1,16 +1,39 @@
-# React + Vite
+# testframe-client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Visual flow editor for TestFrame suites: a Figma-style canvas of steps, each
+split into PRE-EXECUTION (scripts, payloads, requests) and POST-EXECUTION
+(JSON results, assertions) cards.
 
-Currently, two official plugins are available:
+## Stack
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Vite 8 + React 19 + TypeScript (strict) + Tailwind v4 + zod v4 + lucide-react.
 
-## React Compiler
+## Structure
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- `src/App.tsx` - canvas, pan/zoom, execution loop, frame save/load
+- `src/i18n.tsx` - all UI strings in en/pt-BR dictionaries; toggle in the header
+- `src/client-api/` - the only place fetch is allowed (framework + target calls)
+- `src/components/` - StepFrame, TestBlockCard, InspectorPanel, SourcesModal, ExecutionConsole...
+- `src/frames.ts` - persistence contract: `.md` serialization + zod schemas +
+  `{{varName}}` template resolution
 
-## Expanding the Oxlint configuration
+## Running
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Started by the root orchestration (`bun run dev`); standalone:
+
+```bash
+CLIENT_PORT=15173 VITE_SERVER_PORT=18080 VITE_PROJECT=product-test bun run dev
+```
+
+The dev server proxies `/api` to the framework server.
+
+## Commands
+
+```bash
+bun install
+bun run typecheck
+bun run build
+```
+
+The app starts empty and auto-loads frames/sources saved for the project.
+Every user-visible string goes through `useI18n()` - see `AGENTS.md`.
