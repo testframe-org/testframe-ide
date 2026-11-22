@@ -2,6 +2,7 @@ package com.testframe.server.controller;
 
 import com.testframe.server.format.Catalog;
 import com.testframe.server.format.CodeRules;
+import com.testframe.server.format.MongoQuery;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -20,9 +21,13 @@ import java.util.List;
 @RequestMapping("/api/v2")
 public class DomainController {
 
-    /** One card kind of a type: {@code subtype} is null for types without subtypes. */
+    /**
+     * One card kind of a type: {@code subtype} is null for types without subtypes;
+     * {@code sections} are the labeled body sections of mongo cards (empty otherwise).
+     */
     public record CardKindEntry(String subtype, String cardType, String language, String form,
-                                int defaultWidth, int defaultHeight, int defaultTimeout) {
+                                int defaultWidth, int defaultHeight, int defaultTimeout,
+                                List<MongoQuery.Section> sections) {
     }
 
     /**
@@ -48,7 +53,9 @@ public class DomainController {
                 type.name(), type.language(), type.hasSources(), type.subtypes(),
                 type.kinds().stream().map(kind -> {
                     Catalog.Size size = Catalog.defaultSize(kind.cardType());
-                    return new CardKindEntry(kind.subtype(), kind.cardType(), kind.language(), kind.form(), size.width(), size.height(), Catalog.defaultTimeout(kind.cardType()));
+                    return new CardKindEntry(kind.subtype(), kind.cardType(), kind.language(), kind.form(),
+                            size.width(), size.height(), Catalog.defaultTimeout(kind.cardType()),
+                            "mongo".equals(type.name()) ? MongoQuery.sectionsOf(kind.subtype()) : List.of());
                 }).toList())).toList();
         return new CatalogResponse(entries, Catalog.HTTP_METHODS);
     }

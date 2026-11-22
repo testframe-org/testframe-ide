@@ -5,6 +5,7 @@ subtype: find
 collection: products
 timeout: 5000
 -------------------
+filter
 ```json
-{ "filter": { "ativo": true } }
+{ "ativo": true }
 ```

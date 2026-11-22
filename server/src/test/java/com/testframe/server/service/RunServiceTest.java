@@ -239,7 +239,7 @@ class RunServiceTest {
         // with a saved source, the read-only rules still apply before anything connects
         sources.save("demo", List.of(new Source("mongo", "db", "mongodb://127.0.0.1:1/demo", "")));
         FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "{}")
-                .withSubtype("aggregation").withCode("{\"pipeline\": [{\"$out\": \"y\"}]}"))));
+                .withSubtype("aggregation").withCode("{\"aggregation\": [{\"$out\": \"y\"}]}"))));
         assertEquals("error", write.results().getFirst().status());
         assertTrue(write.results().getFirst().text().contains("$out"), write.results().getFirst().text());
     }

@@ -36,7 +36,7 @@ class MongoQueryTest {
     @Test
     void parsesAnAggregationBody() {
         MongoQuery q = MongoQuery.parse("aggregation", "orders", """
-                {"pipeline": [{"$match": {"status": "paid"}}, {"$count": "n"}]}
+                {"aggregation": [{"$match": {"status": "paid"}}, {"$count": "n"}]}
                 """);
         assertEquals("aggregation", q.subtype());
         assertEquals("orders", q.collection());
@@ -61,28 +61,28 @@ class MongoQueryTest {
     @Test
     void rejectsWriteStagesAnywhereInThePipeline() {
         IllegalArgumentException out = assertThrows(IllegalArgumentException.class, () -> MongoQuery.parse("aggregation", "x",
-                "{\"pipeline\": [{\"$match\": {}}, {\"$out\": \"copy\"}]}"));
+                "{\"aggregation\": [{\"$match\": {}}, {\"$out\": \"copy\"}]}"));
         assertEquals("write stage \"$out\" is not allowed (mongo cards are read-only)", out.getMessage());
         IllegalArgumentException merge = assertThrows(IllegalArgumentException.class, () -> MongoQuery.parse("aggregation", "x",
-                "{\"pipeline\": [{\"$facet\": {\"a\": [{\"$merge\": \"y\"}]}}]}"));
+                "{\"aggregation\": [{\"$facet\": {\"a\": [{\"$merge\": \"y\"}]}}]}"));
         assertEquals("write stage \"$merge\" is not allowed (mongo cards are read-only)", merge.getMessage());
     }
 
     @Test
     void rejectsUnknownKeysAndWrongShapes() {
-        assertEquals("unknown key \"collection\" (find accepts filter, projection, sort, limit, skip)",
+        assertEquals("unknown key \"collection\" (find accepts filter, projection, sort, limit, skip, maxTimeMS, collation, hint, comment)",
                 MongoQuery.problem("find", "{\"collection\": \"x\"}"), "the collection lives in the frontmatter");
-        assertEquals("unknown key \"update\" (find accepts filter, projection, sort, limit, skip)",
+        assertEquals("unknown key \"update\" (find accepts filter, projection, sort, limit, skip, maxTimeMS, collation, hint, comment)",
                 MongoQuery.problem("find", "{\"update\": {}}"));
-        assertEquals("unknown key \"filter\" (aggregation accepts pipeline)",
-                MongoQuery.problem("aggregation", "{\"filter\": {}, \"pipeline\": []}"));
-        assertEquals("pipeline is required, e.g. mongo aggregation bodies are one JSON object: {\"pipeline\": [{\"$match\": {\"ativo\": true}}]}",
+        assertEquals("unknown key \"filter\" (aggregation accepts aggregation, allowDiskUse, maxTimeMS, batchSize, collation, hint, comment, let)",
+                MongoQuery.problem("aggregation", "{\"filter\": {}, \"aggregation\": []}"));
+        assertEquals("aggregation is required, e.g. mongo aggregation bodies are one JSON object: {\"aggregation\": [{\"$match\": {\"ativo\": true}}]}",
                 MongoQuery.problem("aggregation", "{}"));
         assertEquals("filter must be an object", MongoQuery.problem("find", "{\"filter\": [1]}"));
         assertEquals("limit must be a non-negative integer", MongoQuery.problem("find", "{\"limit\": -1}"));
         assertEquals("limit must be a non-negative integer", MongoQuery.problem("find", "{\"limit\": 1.5}"));
-        assertEquals("pipeline must be an array of stages", MongoQuery.problem("aggregation", "{\"pipeline\": {}}"));
-        assertEquals("pipeline stage 1 must be an object", MongoQuery.problem("aggregation", "{\"pipeline\": [1]}"));
+        assertEquals("aggregation must be an array of stages (the pipeline)", MongoQuery.problem("aggregation", "{\"aggregation\": {}}"));
+        assertEquals("aggregation stage 1 must be an object", MongoQuery.problem("aggregation", "{\"aggregation\": [1]}"));
         assertEquals("unknown mongo subtype \"remove\" (find, aggregation)", MongoQuery.problem("remove", "{}"));
         assertTrue(MongoQuery.problem("find", "db.products.find({ ativo: true })").startsWith("invalid JSON: "),
                 "the shell syntax is gone: bodies are JSON");
@@ -93,10 +93,30 @@ class MongoQueryTest {
     }
 
     @Test
+    void optionSectionsAreTypeChecked() {
+        assertNull(MongoQuery.problem("find", "{\"maxTimeMS\": 100, \"collation\": {\"locale\": \"pt\"}, \"hint\": {\"nome\": 1}, \"comment\": \"c\"}"));
+        assertNull(MongoQuery.problem("aggregation", "{\"aggregation\": [{\"$match\": {}}], \"allowDiskUse\": false, "
+                + "\"batchSize\": 10, \"hint\": \"idx\", \"let\": {\"x\": 1}}"));
+        assertEquals("allowDiskUse must be true or false",
+                MongoQuery.problem("aggregation", "{\"aggregation\": [{}], \"allowDiskUse\": \"yes\"}"));
+        assertEquals("batchSize must be a positive integer",
+                MongoQuery.problem("aggregation", "{\"aggregation\": [{}], \"batchSize\": 0}"));
+        assertEquals("maxTimeMS must be a non-negative integer", MongoQuery.problem("find", "{\"maxTimeMS\": -1}"));
+        assertEquals("hint must be an index name (string) or an index key object", MongoQuery.problem("find", "{\"hint\": 1}"));
+        assertEquals("comment must be a string", MongoQuery.problem("find", "{\"comment\": {}}"));
+        assertEquals("let must be an object", MongoQuery.problem("aggregation", "{\"aggregation\": [{}], \"let\": []}"));
+        assertEquals("collation needs a locale, e.g. {\"locale\": \"pt\"}", MongoQuery.problem("find", "{\"collation\": {}}"));
+        assertEquals("unknown collation key \"lang\" (locale, caseLevel, caseFirst, strength, numericOrdering, alternate, "
+                + "maxVariable, normalization, backwards)", MongoQuery.problem("find", "{\"collation\": {\"locale\": \"pt\", \"lang\": 1}}"));
+        assertEquals("unknown key \"allowDiskUse\" (find accepts filter, projection, sort, limit, skip, maxTimeMS, collation, hint, comment)",
+                MongoQuery.problem("find", "{\"allowDiskUse\": true}"), "find has no allowDiskUse");
+    }
+
+    @Test
     void bindingsStandForAnyValueInTheCodeRule() {
         assertNull(MongoQuery.problem("find", "{\"filter\": {\"nome\": \"{{first.nome}}\"}, \"limit\": {{n}}}"));
         assertNull(MongoQuery.problem("find", "{\"filter\": \"{{filter}}\"}"));
-        assertNull(MongoQuery.problem("aggregation", "{\"pipeline\": [{\"$match\": {\"a\": {{a}}}}, \"{{stage}}\"]}"));
+        assertNull(MongoQuery.problem("aggregation", "{\"aggregation\": [{\"$match\": {\"a\": {{a}}}}, \"{{stage}}\"]}"));
         // once resolved, the real types are checked again
         assertThrows(IllegalArgumentException.class, () -> MongoQuery.parse("find", "x", "{\"limit\": \"{{n}}\"}"));
     }

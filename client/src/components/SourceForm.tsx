@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, ExternalLink, Loader2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { checkSourceCode, formKindOf } from '../catalog';
+import { cardKindOf, checkSourceCode, formKindOf } from '../catalog';
+import { joinSections, splitSections } from '../mongo-sections';
 import { testframeApi } from '../client-api';
 import { useI18n } from '../i18n';
 import type { Card, OpenApiSpec, SourceDef } from '../client-api/testframe.z';
@@ -26,11 +27,142 @@ const inputCls =
 const editorCls =
   'w-full bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-3 rounded-lg border border-slate-700 outline-none focus:border-blue-500/60 resize-y';
 
-// Placeholder of a mongo body per subtype (find / aggregation)
-const MONGO_PLACEHOLDER: Record<string, string> = {
-  find: '{ "filter": { "ativo": true } }',
-  aggregation: '{ "pipeline": [{ "$match": { "ativo": true } }] }'
+// Placeholder of a mongo body section, by its JSON kind
+const SECTION_PLACEHOLDER: Record<string, string> = {
+  filter: '{ "ativo": true }',
+  projection: '{ "nome": 1 }',
+  sort: '{ "preco": -1 }',
+  aggregation: '[\n  { "$match": { "ativo": true } }\n]',
+  collation: '{ "locale": "pt", "strength": 2 }',
+  hint: '"nome_1"  or  { "nome": 1 }',
+  let: '{ "wanted": true }'
 };
+
+// The mongo form: one editor per body section served by the catalog (find: filter/projection/
+// sort as JSON, limit/skip as numbers; aggregation: the pipeline array). The sections are
+// joined into the card's code object ({ "filter": ..., ... }), the wire form of the card.
+function MongoSectionsForm({ card, onChange, completion }: {
+  card: Card;
+  onChange: (updates: Partial<Card>) => void;
+  completion: CompletionContext;
+}) {
+  const { t } = useI18n();
+  const sections = cardKindOf(card.sourceType, card.subtype)?.sections ?? [];
+  // Section texts are kept here while typing (a half-typed value need not split back from the
+  // code); they are read from the code when another card is edited
+  const [values, setValues] = useState<Record<string, string> | null>(() => splitSections(card.code));
+  useEffect(() => {
+    setValues(splitSections(card.code));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card.id, card.subtype]);
+  if (!values) {
+    // not an object of sections (e.g. typed by hand elsewhere): edit the raw code
+    return (
+      <div>
+        <Label>{t('codeLabel')}</Label>
+        <Editor
+          completion={completion}
+          value={card.code}
+          onChange={(code) => {
+            onChange({ code });
+            const split = splitSections(code);
+            if (split) setValues(split);
+          }}
+          rows={10}
+        />
+        <Status ok={false} text={t('mongoSectionsInvalid')} />
+      </div>
+    );
+  }
+  const setSection = (name: string, value: string) => {
+    const next = { ...values, [name]: value };
+    setValues(next);
+    const order = [...sections.map((s) => s.name), ...Object.keys(next).filter((k) => !sections.some((s) => s.name === k))];
+    onChange({ code: joinSections(order.map((k) => [k, next[k] ?? ''])) });
+  };
+  const field = (section: (typeof sections)[number]) => {
+    const value = values[section.name] ?? '';
+    const label = <Label>{section.name}{section.required ? ' *' : ''}</Label>;
+    if (section.kind === 'integer' || section.kind === 'positiveInteger') {
+      return (
+        <div key={section.name}>
+          {label}
+          <input
+            type="text"
+            inputMode="numeric"
+            value={value}
+            onChange={(e) => setSection(section.name, e.target.value.trim())}
+            placeholder={t('mongoSectionOptional')}
+            className={inputCls}
+          />
+          {value && !/^\d+$/.test(value) && !/^\{\{[^}]+\}\}$/.test(value) && (
+            <Status ok={false} text={t('mongoIntegerInvalid')} />
+          )}
+        </div>
+      );
+    }
+    if (section.kind === 'boolean') {
+      // absent / true / false: absent leaves the driver default
+      return (
+        <div key={section.name}>
+          {label}
+          <select value={value} onChange={(e) => setSection(section.name, e.target.value)} className={inputCls}>
+            <option value="">{t('mongoOptionDefault')}</option>
+            <option value="true">true</option>
+            <option value="false">false</option>
+          </select>
+        </div>
+      );
+    }
+    if (section.kind === 'string') {
+      // stored as a JSON string; the field edits its text
+      let text = value;
+      try {
+        if (value) text = String(JSON.parse(value));
+      } catch {
+        /* a binding or a draft: edit as written */
+      }
+      return (
+        <div key={section.name}>
+          {label}
+          <input
+            type="text"
+            value={text}
+            onChange={(e) => setSection(section.name, e.target.value ? JSON.stringify(e.target.value) : '')}
+            placeholder={t('mongoSectionOptional')}
+            className={inputCls}
+          />
+        </div>
+      );
+    }
+    const status = jsonStatus(value);
+    return (
+      <div key={section.name}>
+        {label}
+        <Editor
+          completion={completion}
+          value={value}
+          onChange={(v) => setSection(section.name, v)}
+          rows={section.kind === 'array' ? 10 : section.kind === 'hint' ? 2 : 4}
+          placeholder={SECTION_PLACEHOLDER[section.name] ?? ''}
+        />
+        {value.trim() && <Status ok={status.ok} text={status.ok ? t('jsonValid') : t('jsonInvalid', { msg: status.message })} />}
+      </div>
+    );
+  };
+  const options = sections.filter((s) => s.option);
+  return (
+    <div className="space-y-3">
+      {sections.filter((s) => !s.option).map(field)}
+      {options.length > 0 && (
+        <details className="rounded-lg border border-slate-200 px-3 py-2" open={options.some((s) => values[s.name])}>
+          <summary className="cursor-pointer text-xs font-medium text-slate-600">{t('mongoOptions')}</summary>
+          <div className="mt-2 space-y-3">{options.map(field)}</div>
+        </details>
+      )}
+    </div>
+  );
+}
 
 function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-slate-600 mb-1">{children}</label>;
@@ -215,28 +347,16 @@ export function SourceForm({ card, project, source, onChange, completionVars = {
           </div>
         </div>
       );
-    case 'mongo': {
-      const status = jsonStatus(card.code);
+    case 'mongo':
       return (
         <div className="space-y-3">
           {source?.baseUrl && <p className="text-[11px] text-slate-500 font-mono">{t('connectionHint', { url: source.baseUrl })}</p>}
-          <div>
-            <Label>{t('mongoBodyLabel', { subtype: card.subtype ?? '' })}</Label>
-            <Editor
-              completion={completion}
-              value={card.code}
-              onChange={setCode}
-              rows={14}
-              placeholder={MONGO_PLACEHOLDER[card.subtype ?? ''] ?? MONGO_PLACEHOLDER.find}
-            />
-            {card.code.trim() && !status.ok && <Status ok={false} text={t('jsonInvalid', { msg: status.message })} />}
-            {card.code.trim() && status.ok && (
-              <Status ok={!problem} text={problem ?? t('codeRuleOk', { type: `mongo ${card.subtype ?? ''}` })} />
-            )}
-          </div>
+          <MongoSectionsForm card={card} onChange={onChange} completion={completion} />
+          {card.code.trim() && (
+            <Status ok={!problem} text={problem ?? t('codeRuleOk', { type: `mongo ${card.subtype ?? ''}` })} />
+          )}
         </div>
       );
-    }
     case 'query':
       return (
         <div className="space-y-3">

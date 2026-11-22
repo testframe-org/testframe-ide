@@ -53,13 +53,13 @@ class FrameServiceTest {
         sources.save("demo", List.of(new Source("mongo", "db", "mongodb://localhost/x", "")));
 
         frames.save("demo", new Frame("Main Flow", List.of(new Step(1, List.of(
-                card("getAll", "mongo", "db", "{}").withPrivateData("token: t"),
+                card("getAll", "mongo", "db", "{\n  \"filter\": {}\n}").withPrivateData("token: t"),
                 card("payload", "rawvalue", "", "{}"))))));
         frames.saveResult("demo", "Main Flow", 1, "getAll", new CardRun("success", "ok", "[]", "0.1s", "2026-11-21T00:00:00Z"));
 
         Path card = root.resolve("demo/testframe/frames/main-flow/step-1/get-all.md");
-        assertTrue(Files.readString(card).endsWith("-------------------\n```json\n{}\n```\n"),
-                "the card holds its own code");
+        assertTrue(Files.readString(card).endsWith("-------------------\nfilter\n```json\n{}\n```\n"),
+                "the card holds its own code (mongo: labeled sections)");
         assertTrue(Files.exists(card.resolveSibling("get-all.private.md")));
         assertTrue(Files.exists(card.resolveSibling("get-all.cache.md")));
         assertEquals("-------------------\n-------------------\nget-all\npayload\n",
@@ -68,7 +68,7 @@ class FrameServiceTest {
         FramesResponse loaded = frames.load("demo");
         assertEquals(List.of(), loaded.errors());
         Card getAll = loaded.frames().getFirst().steps().getFirst().cards().getFirst();
-        assertEquals("{}", getAll.code());
+        assertEquals("{\n  \"filter\": {}\n}", getAll.code());
         assertEquals("find", getAll.subtype());
         assertEquals("token: t", getAll.privateData());
         assertEquals("success", getAll.lastRun().status());
@@ -108,7 +108,7 @@ class FrameServiceTest {
         mvc.perform(post("/api/v2/frames").contentType("application/json").content("""
                         {"project": "demo", "frame": {"name": "main", "steps": [{"number": 1, "cards": [
                           {"varName": "q", "title": "Q", "sourceType": "mongo", "subtype": "aggregation", "collection": "x", "sourceName": "db",
-                           "code": "{\\"pipeline\\": [{\\"$merge\\": \\"y\\"}]}"}]}]}}
+                           "code": "{\\"aggregation\\": [{\\"$merge\\": \\"y\\"}]}"}]}]}}
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("step 1 \"Q\": code: write stage \"$merge\" is not allowed (mongo cards are read-only)"));

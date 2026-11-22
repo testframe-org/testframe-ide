@@ -11,14 +11,14 @@ class CodeRulesTest {
     @Test
     void mongoBodiesFollowTheCardSubtype() {
         String find = "{\"filter\": {\"ativo\": true}, \"limit\": 5}";
-        String aggregation = "{\"pipeline\": [{\"$match\": {\"ativo\": true}}]}";
+        String aggregation = "{\"aggregation\": [{\"$match\": {\"ativo\": true}}]}";
         assertNull(CodeRules.problem("mongo", "find", find));
         assertNull(CodeRules.problem("mongo", "aggregation", aggregation));
         assertNull(CodeRules.problem("mongo", "find", ""));
         assertNull(CodeRules.problem("mongo", "aggregation", null));
-        assertEquals("unknown key \"pipeline\" (find accepts filter, projection, sort, limit, skip)",
+        assertEquals("unknown key \"aggregation\" (find accepts filter, projection, sort, limit, skip, maxTimeMS, collation, hint, comment)",
                 CodeRules.problem("mongo", "find", aggregation));
-        assertEquals("unknown key \"filter\" (aggregation accepts pipeline)",
+        assertEquals("unknown key \"filter\" (aggregation accepts aggregation, allowDiskUse, maxTimeMS, batchSize, collation, hint, comment, let)",
                 CodeRules.problem("mongo", "aggregation", find));
     }
 
@@ -27,7 +27,7 @@ class CodeRulesTest {
         // the missing subtype itself is reported by the card/script validation
         assertNull(CodeRules.problem("mongo", null, "db.x.find()"));
         assertEquals("write stage \"$out\" is not allowed (mongo cards are read-only)",
-                CodeRules.problem("mongo", "aggregation", "{\"pipeline\": [{\"$out\": \"y\"}]}"));
+                CodeRules.problem("mongo", "aggregation", "{\"aggregation\": [{\"$out\": \"y\"}]}"));
     }
 
     @Test

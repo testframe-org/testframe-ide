@@ -2,16 +2,17 @@ package com.testframe.server.runner;
 
 import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.client.AggregateIterable;
+import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoCollection;
 import jakarta.annotation.PreDestroy;
 import com.testframe.server.format.MongoQuery;
-import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.json.JsonMode;
 import org.bson.json.JsonWriterSettings;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.SimpleMongoClientDatabaseFactory;
-import org.springframework.data.mongodb.core.query.BasicQuery;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -40,10 +41,14 @@ public class MongoRunner {
 
     /** Result as a JSON string: {"operation" (the subtype), "collection", "count", "result"}. */
     public String run(String uri, MongoQuery query, long timeoutMs) {
-        MongoTemplate template = template(uri);
+        MongoCollection<Document> collection = template(uri).getCollection(query.collection());
         List<Document> result = switch (query.subtype()) {
-            case MongoQuery.FIND -> template.find(find(query, timeoutMs), Document.class, query.collection());
-            case MongoQuery.AGGREGATION -> aggregate(template, query, timeoutMs);
+            case MongoQuery.FIND -> applyFind(collection.find(query.filter()), query, timeoutMs).into(new ArrayList<>());
+            case MongoQuery.AGGREGATION -> {
+                List<Document> docs = applyAggregate(collection.aggregate(query.pipeline()), query, timeoutMs)
+                        .into(new ArrayList<>());
+                yield docs.size() > MAX_DOCUMENTS ? docs.subList(0, MAX_DOCUMENTS) : docs;
+            }
             default -> throw new IllegalArgumentException("unknown mongo subtype \"" + query.subtype() + "\"");
         };
         return new Document("operation", query.subtype())
@@ -53,26 +58,62 @@ public class MongoRunner {
                 .toJson(JSON);
     }
 
-    private static BasicQuery find(MongoQuery q, long timeoutMs) {
-        BasicQuery query = new BasicQuery(doc(q.filter()), doc(q.projection()));
-        query.setSortObject(doc(q.sort()));
+    /**
+     * The find sections on the driver's {@link FindIterable}: projection, sort, skip, limit (at most
+     * {@link #MAX_DOCUMENTS}), maxTime (the card timeout, or maxTimeMS when lower), collation, hint
+     * (index name or keys) and comment.
+     */
+    static <T> FindIterable<T> applyFind(FindIterable<T> find, MongoQuery q, long timeoutMs) {
+        FindIterable<T> it = find.projection(q.projection()).sort(q.sort())
+                .limit(q.limit() == null ? MAX_DOCUMENTS : Math.min(MAX_DOCUMENTS, q.limit()))
+                .maxTime(maxTime(q, timeoutMs), TimeUnit.MILLISECONDS);
         if (q.skip() != null) {
-            query.skip(q.skip());
+            it = it.skip(q.skip());
         }
-        query.limit(q.limit() == null ? MAX_DOCUMENTS : Math.min(MAX_DOCUMENTS, q.limit()));
-        query.maxTimeMsec(timeoutMs);
-        return query;
+        MongoQuery.Options o = q.options();
+        if (o.collation() != null) {
+            it = it.collation(o.collation());
+        }
+        if (o.hint() != null) {
+            it = o.hint().isString() ? it.hintString(o.hint().asString().getValue()) : it.hint(o.hint().asDocument());
+        }
+        if (o.comment() != null) {
+            it = it.comment(o.comment());
+        }
+        return it;
     }
 
-    private static List<Document> aggregate(MongoTemplate template, MongoQuery q, long timeoutMs) {
-        List<Document> docs = template.getCollection(q.collection()).aggregate(q.pipeline())
-                .maxTime(timeoutMs, TimeUnit.MILLISECONDS)
-                .into(new ArrayList<>());
-        return docs.size() > MAX_DOCUMENTS ? docs.subList(0, MAX_DOCUMENTS) : docs;
+    /**
+     * The aggregation option sections on the driver's {@link AggregateIterable}: maxTime (the card
+     * timeout, or maxTimeMS when lower), allowDiskUse, batchSize, collation, hint, comment and let.
+     */
+    static <T> AggregateIterable<T> applyAggregate(AggregateIterable<T> aggregate, MongoQuery q, long timeoutMs) {
+        AggregateIterable<T> it = aggregate.maxTime(maxTime(q, timeoutMs), TimeUnit.MILLISECONDS);
+        MongoQuery.Options o = q.options();
+        if (o.allowDiskUse() != null) {
+            it = it.allowDiskUse(o.allowDiskUse());
+        }
+        if (o.batchSize() != null) {
+            it = it.batchSize(o.batchSize());
+        }
+        if (o.collation() != null) {
+            it = it.collation(o.collation());
+        }
+        if (o.hint() != null) {
+            it = o.hint().isString() ? it.hintString(o.hint().asString().getValue()) : it.hint(o.hint().asDocument());
+        }
+        if (o.comment() != null) {
+            it = it.comment(o.comment());
+        }
+        if (o.let() != null) {
+            it = it.let(o.let());
+        }
+        return it;
     }
 
-    private static Document doc(BsonDocument value) {
-        return value == null ? new Document() : Document.parse(value.toJson());
+    private static long maxTime(MongoQuery q, long timeoutMs) {
+        Integer maxTimeMS = q.options().maxTimeMS();
+        return maxTimeMS == null || maxTimeMS == 0 ? timeoutMs : Math.min(timeoutMs, maxTimeMS); // 0 = no own limit
     }
 
     private MongoTemplate template(String uri) {

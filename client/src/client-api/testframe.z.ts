@@ -175,7 +175,15 @@ export const cardKindSchema = z.object({
   form: formKindSchema,
   defaultWidth: z.number(),
   defaultHeight: z.number(),
-  defaultTimeout: z.number()
+  defaultTimeout: z.number(),
+  // mongo cards: the labeled body sections (find: filter/projection/sort/limit/skip + options;
+  // aggregation: aggregation, the pipeline, + options); empty for other kinds
+  sections: z.array(z.object({
+    name: z.string(),
+    kind: z.enum(['object', 'array', 'integer', 'positiveInteger', 'boolean', 'string', 'hint']),
+    required: z.boolean(),
+    option: z.boolean() // a command option: shown in the collapsible options group
+  }))
 });
 export type CardKind = z.infer<typeof cardKindSchema>;
 

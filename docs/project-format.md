@@ -18,7 +18,8 @@ The project is in beta: this format changes without migrations or legacy loaders
    their defaults (`size`) or empty (`endpoint`). It may be empty.
 3. **One envelope for every file:** a `-------------------` line, `key: value` lines and a
    closing `-------------------` line, then the body. A card's body is a single fenced
-   Markdown block tagged with the language of its (type-source, subtype).
+   Markdown block tagged with the language of its (type-source, subtype); mongo cards write
+   labeled sections instead (a label line + its own ```` ```json ```` block each).
 4. **Every card declares its type-source** (`source:`), and its **subtype** when the type has
    subtypes. A card always holds its own code: sources have no scripts.
 5. **A source is only its connection:** `{type}/{name}.md` holds `base-url` and nothing else.
@@ -97,14 +98,40 @@ type is rejected on save (400) and reported in `errors` on load.
 ## Mongo cards
 
 The collection is frontmatter (`collection: products`, required), like an openapi card's
-`endpoint`. The body is one JSON object (fenced as ```` ```json ````); `{{bindings}}` may appear
-anywhere in it (the rule checks the body with every binding standing for any value, and checks
-the resolved types again at run time). Unknown keys are rejected, `collection` included.
+`endpoint`. The body is a sequence of LABELED sections: a label line followed by its own
+```` ```json ```` block. On the wire (the card's `code` in the API) the sections are one JSON
+object keyed by label, e.g. `{ "filter": { "ativo": true } }`; the server converts between the
+two. Each label appears at most once; an unknown or repeated label, a label without a
+```` ```json ```` block or text outside sections is a validation error. `{{bindings}}` may appear
+in any block (the rule checks the body with every binding standing for any value, and checks the
+resolved types again at run time). Parsing tolerates blank lines and whitespace between and
+inside sections; rendering writes the sections in the canonical order below, each block trimmed
+and without blank lines, so a saved card renders byte-identically again.
 
-- subtype `find`: `{ "filter": { "ativo": true } }`, optional `projection`, `sort` (objects),
-  `limit`, `skip` (non-negative integers; at most 1000 documents); every key is optional (an
-  empty body reads the whole collection).
-- subtype `aggregation`: `{ "pipeline": [ { "$match": { "ativo": true } } ] }`.
+| subtype | sections (canonical order) |
+|---|---|
+| `find` | `filter`, `projection`, `sort` (objects), `limit`, `skip` (integers ≥ 0; at most 1000 documents) — all optional, an empty body reads the whole collection; options: `maxTimeMS` (integer ≥ 0), `collation` (object), `hint` (index name string or key object), `comment` (string) |
+| `aggregation` | `aggregation` (required): the pipeline, a JSON array of stage objects; options: `allowDiskUse` (boolean), `maxTimeMS` (integer ≥ 0), `batchSize` (integer ≥ 1), `collation` (object), `hint` (string or object), `comment` (string), `let` (object: pipeline variables) |
+
+The options go to the driver's `FindIterable` / `AggregateIterable` (`maxTime` is the card
+timeout, or `maxTimeMS` when lower and not 0; `collation` takes the driver's keys: `locale`
+(required), `caseLevel`, `caseFirst`, `strength`, `numericOrdering`, `alternate`, `maxVariable`,
+`normalization`, `backwards`). Field references inside values keep MongoDB's `$field` syntax.
+
+````
+# find                                   # aggregation
+filter                                   aggregation
+```json                                  ```json
+{ "ativo": true }                        [
+```                                        { "$match": { "ativo": true } },
+projection                                 { "$group": { "_id": "$categoria", "total": { "$sum": 1 } } }
+```json                                  ]
+{ "nome": 1 }                            ```
+```                                      allowDiskUse
+                                         ```json
+                                         true
+                                         ```
+````
 
 Read-only: write stages (`$out`, `$merge`) are rejected anywhere in the body, before anything
 connects. Values are JSON; MongoDB extended JSON (`{"$oid": "..."}`) is understood. The
@@ -163,6 +190,10 @@ server always writes it without). Saving a frame rewrites it; the var-name `flow
 reserved because it would collide with this file. On load, cards missing from the list are
 appended (by file name) and entries without a card file are reported in `errors` — the
 sequence is never silently lost.
+
+A step with no cards is valid and is stored as its `step-{n}/` folder holding an empty `flow.md`
+(envelope only, no entries); saving always writes a `flow.md` for every step, and loading a
+`flow.md` with no entries yields an empty step.
 
 ## Sources: `sources/{type-source}/{name-source}.md`
 
@@ -272,8 +303,9 @@ subtype: find
 collection: products
 timeout: 5000
 -------------------
+filter
 ```json
-{ "filter": { "ativo": true } }
+{ "ativo": true }
 ```
 
 # frames/active-products-echo/step-2/create-product.md

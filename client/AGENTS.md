@@ -17,7 +17,7 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   collection (mongo cards) on the left; `SourceForm` on the right once (type, subtype) is complete),
   `SourceForm` (the form served by the catalog per (type, subtype): request/swagger with the
   openapi operation select (from the source's cached spec; stores `openapiId` + `endpoint`),
-  mongo (JSON body per subtype; the collection is a card field), query (sql), script, condition, json, code),
+  mongo (one editor per body section served by the catalog — JSON editors, numbers, booleans, options collapsed — joined into the wire code by `src/mongo-sections.ts`; the collection is a card field), query (sql), script, condition, json, code),
   `ExecutionConsole`, `SourcesView` (the Sources tab: source CRUD — type (only types with named
   sources), name, base-url, private data; a source is only its connection)
   , `CodeEditor` (the code textarea of `SourceForm` with a completion popup)

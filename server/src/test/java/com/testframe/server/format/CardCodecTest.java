@@ -61,7 +61,7 @@ class CardCodecTest {
         assertEquals("mongo", getActive.sourceType());
         assertEquals("find", getActive.subtype());
         assertEquals("products", getActive.collection());
-        assertEquals("{ \"filter\": { \"ativo\": true } }", getActive.code(),
+        assertEquals("{\n  \"filter\": { \"ativo\": true }\n}", getActive.code(),
                 "the card holds its own code");
         Card activeProducts = frame.steps().getFirst().cards().get(1);
         assertEquals("rawvalue", activeProducts.sourceType(), "every card declares its type-source");
