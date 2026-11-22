@@ -107,7 +107,7 @@ sequence is never silently lost.
 
 ## Last run: `{var-file}.result-data.md`
 
-After a card runs (whole flow or the card editor's Run), the editor stores its last result next
+After a card runs (whole flow or the card editor's Run, both executed by `POST /api/v2/run*`), the editor stores its last result next
 to it: frontmatter `status`, `ran-at`, `elapsed`, `summary`; the body is the output fenced
 as `json` (or `text` when it does not parse as JSON). The server adds `*.result-data.md` to the
 project's `testframe/.gitignore`, keeps a result while its card exists and deletes it with the
@@ -164,6 +164,14 @@ The API exchanges structured JSON; the server builds every path and file. Full s
 - `GET /api/v2/sources/{project}` → `{sources}`; `POST /api/v2/sources` `{project, sources}`:
   for each sent source, `{type}/{name}.md`, `{type}/{name}.private.md` and the `{type}/{name}/`
   script folder are replaced. Sources that are not sent are untouched.
+- `POST /api/v2/run` `{project, frame, steps: [{number, cards}]}`: runs the frame on the server
+  (execution section above, in the sent order, stopping at the first error card) and returns
+  `{project, frame, results: [{varName, status, text, output, at, ranAt, code}], vars}` —
+  everything the editor needs to show and store each card's run (`code` is set when the run
+  rewrote that JSON result card's body). Bindings, HTTP requests, mongo scripts, assertions and
+  the code rules all execute server-side; nothing here reads or writes project files.
+- `POST /api/v2/run/card` `{project, step, card, vars, payload, resultCard}`: the same engine
+  for a single card (the editor's Run button), returning `{result, vars}`.
 - Invalid data is rejected with 400 `{status, message}` before anything is written. The store
   still validates every path: it strips `..`, applies a character whitelist, checks that the
   path stays under the projects dir, accepts only `.md` files, and never allows a scope equal

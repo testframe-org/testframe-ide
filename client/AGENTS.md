@@ -9,19 +9,21 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   `en` dictionary (authoritative); the `pt` dictionary is typed `Record<TKey, string>` so
   a missing translation fails the typecheck. Language persists to localStorage; toggle in the header.
 - `src/client-api/` — network layer: `http.ts` (`requestJson` + `ApiError`), `testframe.ts`
-  (framework endpoints), `target.ts` (`runTargetRequest` for flow requests, timed). No `fetch`
-  calls outside this folder except card-driven target dispatch.
+  (every framework endpoint, including the runner `POST /api/v2/run` and `/api/v2/run/card`).
+  No other `fetch` calls exist: the editor never executes flow requests itself.
 - `src/components/` — `StepFrame`, `TestBlockCard`, `ConnectorArrow`, `AddBlockCircleButton`,
   `CardEditModal` (opened by a card's Edit button: general fields on the left, `SourceForm` on the right),
   `SourceForm` (one form per type-source: http, swagger, query, assert, json, expression, code),
   `ExecutionConsole`, `SourcesView` (the Sources tab: source CRUD incl. the scripts editor)
-- `src/frames.ts` — editor model and runtime helpers. It does **not** own the project format:
-  the server (`server/.../format/`, spec `../docs/project-format.md`) parses/renders the `.md`
-  files, applies script inheritance and validates on save; the API exchanges JSON.
-  Here: `framesFromApi` / `frameToApi` (JSON ↔ in-memory `Frame`/`Card`, card ids
-  `{frame}/step-{n}/{var-file}`), `pickFrame`, `cardVarName`, name helpers mirrored from the
-  server for live feedback (`slug`, `toVarName`, `normalizeVarName`, `varNameToFileName`),
-  `endpointParts` and `substituteTemplates` for `{{varName.path}}` bindings (runner, Phase 3).
+- `src/frames.ts` — editor model only. It does **not** own the project format: the server
+  (`server/.../format/`, spec `../docs/project-format.md`) parses/renders the `.md` files,
+  applies script inheritance and validates on save; the API exchanges JSON. Execution is a
+  server concern since phase 3: `{{bindings}}`, HTTP requests, mongo scripts and assertions
+  run through `POST /api/v2/run` / `POST /api/v2/run/card`, so no template or endpoint parsing
+  lives here anymore. Here: `framesFromApi` / `frameToApi` / `cardToApi` (JSON ↔ in-memory
+  `Frame`/`Card`, card ids `{frame}/step-{n}/{var-file}`), `pickFrame`, `cardVarName`, and the
+  name helpers mirrored from the server for live feedback (`slug`, `toVarName`,
+  `normalizeVarName`, `varNameToFileName`).
 - `src/catalog.ts` — the domain definitions served by the server (Phase 2): `loadCatalog()`
   (called once at boot, before frames load) fills `SOURCE_TYPES`, `HTTP_METHODS`,
   `DEFAULT_CARD_SIZE`/`DEFAULT_TIMEOUT`, `cardTypeOf` and `hasScripts`; `checkSourceCode()`
@@ -48,10 +50,12 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
 - Frames and sources cross the wire as JSON validated by the server: a rejected save is a 400
   `{status, message}` (`ApiError.reason`), and load problems come back in `errors`. Both surface
   in the execution console (source save errors also in the Sources tab), never as silent crashes.
-- Requests execute live against the framework (`POST /api/v2/echo`) when the endpoint
-  matches `METHOD /path`; validation cards starting with `assert` execute live against
-  `POST /api/v2/assertions`; responses feed the step's JSON result card and publish
-  variables named after each card's `var-name`.
+- Cards never execute in the browser (phase 3): the whole flow runs through
+  `POST /api/v2/run` (steps in order, cards in array order, first error stops the run) and a
+  single card through `POST /api/v2/run/card` with the editor's current variables. The
+  response's per-card outcomes drive the card status, the console line and the stored result;
+  a rewritten JSON result card comes back in the outcome's `code`. If the server is down the
+  run fails with an error log — there is no client-side fallback.
 - Card files are `frames/{frame}/step-{n}/{var-file}.md` (var-name camelCase, kebab on disk,
   unique per frame). The header edits the frame name; cards bound to a source `script` keep
   an empty body on disk while they match it. Default var-names are English identifiers.
@@ -61,8 +65,9 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
   always `slug(projectName)`; the app auto-loads saved frames/sources.
 - Every run stores the card's last result (`{var-file}.result-data.md`, gitignored) and shows it
   under the card's script on the canvas; results reload with the project.
-- `mongo` cards run live through `POST /api/v2/run/mongo` (the server reads the connection from the
-  saved source file); request and assert cards also run live; other source types are simulated.
+- On the server runner, `mongo` cards execute through the saved source's connection, request
+  cards over real HTTP and `assert` cards through the Java engine; other source types stay
+  simulated (they publish the step's JSON result card so later bindings resolve).
 - The top tabs switch between Frames (canvas) and Sources (registry). There is no side inspector:
   cards are edited in `CardEditModal`; double-click on a card body still edits its code inline.
 - Keep the Figma look (ring per status, floating console).

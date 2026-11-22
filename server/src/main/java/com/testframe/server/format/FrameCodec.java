@@ -180,7 +180,9 @@ public final class FrameCodec {
             if (priv != null) {
                 claimed.add(base);
             }
-            Card card = parsed.card().withStored(priv == null ? null : priv.body(), results.get(base));
+            Card card = parsed.card()
+                    .withPrivateData(priv == null ? null : priv.body())
+                    .withLastRun(results.get(base));
             byFrame.computeIfAbsent(m.group(1), k -> new TreeMap<>())
                     .computeIfAbsent(Integer.parseInt(m.group(2)), k -> new ArrayList<>())
                     .add(new Entry(m.group(3), card));

@@ -1,4 +1,4 @@
-import type { Card, CardData, CardRunResult, CardType, EndpointParts, Frame, FrameData, FramesLoadResponse, Step } from './types';
+import type { Card, CardData, CardRunResult, CardType, Frame, FrameData, FramesLoadResponse, Step } from './types';
 import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT } from './catalog';
 
 // ============================================================================
@@ -7,9 +7,11 @@ import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT } from './catalog';
 // modules/testframe-ide/docs/project-format.md). The domain definitions —
 // source types, card types, defaults, HTTP methods and the code rules per
 // source type — are served too (GET /api/v2/catalog, POST /api/v2/validate;
-// see catalog.ts). This module keeps the editor's in-memory model, the name
+// see catalog.ts). This module keeps the editor's in-memory model and the name
 // helpers used for live feedback (a mirror of the server's format/Names, the
-// server enforces them on save) and the run-time binding helpers (Phase 3).
+// server enforces them on save). Execution is a server concern since phase 3:
+// {{bindings}}, HTTP requests, mongo scripts and assertions run through
+// POST /api/v2/run and POST /api/v2/run/card.
 // ============================================================================
 
 // Frame used when a project has none yet
@@ -49,15 +51,6 @@ export const fileNameToVarName = (fileName: string): string => toVarName(fileNam
 export const normalizeVarName = (input: string): string => fileNameToVarName(varNameToFileName(input));
 
 // --- HELPERS ---
-export const endpointParts = (card: Pick<Card, 'endpoint' | 'httpMethod'>): EndpointParts | null => {
-  const trimmed = String(card.endpoint || '').trim();
-  const m = trimmed.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)$/i);
-  if (m) return { method: m[1].toUpperCase(), path: m[2] };
-  if (card.httpMethod && trimmed.startsWith('/')) {
-    return { method: String(card.httpMethod).toUpperCase(), path: trimmed };
-  }
-  return null;
-};
 
 // The frame to show: the requested one when it exists, else the first on disk
 export const pickFrame = (frames: Frame[], preferred?: string): Frame | undefined =>
@@ -109,6 +102,25 @@ export const framesFromApi = (
   return { frames, errors: data.errors ?? [], results };
 };
 
+// One card for the frame API and the runner (POST /api/v2/frames, /api/v2/run, /api/v2/run/card).
+export const cardToApi = (card: Card): CardData => ({
+  varName: cardVarName(card),
+  title: card.title,
+  type: card.type,
+  sourceType: card.sourceType,
+  sourceName: card.sourceName,
+  script: card.script ?? null,
+  endpoint: card.endpoint,
+  httpMethod: card.httpMethod,
+  timeout: card.timeout,
+  width: card.width,
+  height: card.height,
+  resultHeight: card.resultHeight ?? null,
+  code: card.code,
+  privateData: card.privateData ?? null,
+  lastRun: null
+});
+
 // One frame for POST /api/v2/frames: the server numbers steps by position, stores the card
 // sequence in the step's flow.md, validates var-names, the frontmatter and the code rules,
 // and stores inherited script bodies empty.
@@ -116,65 +128,6 @@ export const frameToApi = (name: string, steps: Step[]): FrameData => ({
   name,
   steps: steps.map((step, idx) => ({
     number: idx + 1,
-    cards: step.cards.map((card) => ({
-      varName: cardVarName(card),
-      title: card.title,
-      type: card.type,
-      sourceType: card.sourceType,
-      sourceName: card.sourceName,
-      script: card.script ?? null,
-      endpoint: card.endpoint,
-      httpMethod: card.httpMethod,
-      timeout: card.timeout,
-      width: card.width,
-      height: card.height,
-      resultHeight: card.resultHeight ?? null,
-      code: card.code,
-      privateData: card.privateData ?? null,
-      lastRun: null
-    }))
+    cards: step.cards.map(cardToApi)
   }))
 });
-
-// --- VARIABLE BINDING: {{varName}}, {{varName.0.nome}} resolved across steps ---
-const TEMPLATE_RE = /\{\{\s*([\w.]+)\s*\}\}/g;
-
-export const resolveTemplatePath = (path: string, vars: Record<string, unknown>): unknown => {
-  const [head, ...rest] = path.split('.');
-  let value: unknown = vars[head];
-  for (const segment of rest) {
-    if (value == null) return undefined;
-    if (Array.isArray(value)) {
-      const index = Number(segment);
-      value = Number.isInteger(index) ? value[index] : undefined;
-    } else if (typeof value === 'object') {
-      value = (value as Record<string, unknown>)[segment];
-    } else {
-      return undefined;
-    }
-  }
-  return value;
-};
-
-// Walks a parsed JSON payload replacing {{...}} with values from previous cards.
-export const substituteTemplates = (input: unknown, vars: Record<string, unknown>): unknown => {
-  if (typeof input === 'string') {
-    const whole = input.match(/^\{\{\s*([\w.]+)\s*\}\}$/);
-    if (whole) {
-      const value = resolveTemplatePath(whole[1], vars);
-      return value === undefined ? input : value;
-    }
-    return input.replace(TEMPLATE_RE, (match, path: string) => {
-      const value = resolveTemplatePath(path, vars);
-      if (value === undefined) return match;
-      return typeof value === 'string' ? value : JSON.stringify(value);
-    });
-  }
-  if (Array.isArray(input)) return input.map((item) => substituteTemplates(item, vars));
-  if (input && typeof input === 'object') {
-    return Object.fromEntries(
-      Object.entries(input).map(([key, value]) => [key, substituteTemplates(value, vars)])
-    );
-  }
-  return input;
-};

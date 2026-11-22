@@ -17,17 +17,16 @@ import {
 } from 'lucide-react';
 import {
   DEFAULT_FRAME,
+  cardToApi,
   cardVarName,
-  endpointParts,
   frameToApi,
   framesFromApi,
   pickFrame,
   slug,
-  substituteTemplates,
   varNameToFileName
 } from './frames';
-import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT, checkSourceCode, loadCatalog } from './catalog';
-import { ApiError, runTargetRequest, testframeApi } from './client-api';
+import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT, loadCatalog } from './catalog';
+import { ApiError, testframeApi } from './client-api';
 import { useI18n } from './i18n';
 import { setProjectInUrl, touchRecentProject } from './recent-projects';
 import { ExecutionConsole } from './components/ExecutionConsole';
@@ -39,7 +38,6 @@ import type {
   CardRunResult,
   CardStatus,
   ExecLog,
-  HttpResult,
   LogLevel,
   ResizeDirection,
   SelectedContext,
@@ -412,169 +410,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
       .catch((err: Error) => pushFrameMsg(t('resultSaveFail', { path, msg: err.message }), 'error'));
   };
 
-  // Executes one card. Mutates `vars` (publishes this card's variable) and may update the
-  // step's JSON result card. Shared by the full flow run and the single-card run.
-  const executeCard = async (
-    card: Card,
-    step: Step,
-    vars: Record<string, unknown>,
-    elapsedOf: () => string
-  ): Promise<CardRunResult> => {
-    const varKey = cardVarName;
-    const stepLabel = t('logStep', { n: step.number });
-    let output = '';
-    // Cards run left to right: inputs come from the nearest JSON card before this one,
-    // results go to the first JSON card after it
-    const position = step.cards.findIndex((c) => c.id === card.id);
-    const jsonBefore = step.cards.slice(0, position).filter((c) => c.type === 'json').reverse();
-    const nextJson = step.cards.slice(position + 1).find((c) => c.type === 'json');
-    // Forced failure only through an explicit marker in the code
-    const shouldFail =
-      card.code.toLowerCase().includes('force_fail') ||
-      card.code.toLowerCase().includes('expect(false).tobe(true)');
-
-    let http: HttpResult | null = null;
-    // Per-source code rule (served by the server): invalid code never runs
-    const codeProblem = await checkSourceCode(card.sourceType, card.code);
-    // Live source-script run (mongo): value published as the card's variable
-    let live: { ok: boolean; summary: string; value: unknown; ms: number } | null = null;
-    let assertion: { passed?: boolean; actual?: unknown; expected?: unknown; operator?: string } | null = null;
-    if (codeProblem) {
-      live = { ok: false, summary: codeProblem, value: null, ms: 0 };
-    } else if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
-      // Live assertion against the framework engine (source type: assert). The input is every
-      // variable published so far, by var-name: assert $count(activeProducts) > 0
-      const input: Record<string, unknown> = { ...vars };
-      const assertRes = await runTargetRequest('POST', '/api/v2/assertions', {
-        expression: card.code.trim(),
-        input
-      });
-      if (assertRes.ok) {
-        try {
-          assertion = JSON.parse(assertRes.text);
-        } catch {
-          assertion = null;
-        }
-      } else {
-        assertion = { passed: false, actual: `HTTP ${assertRes.status}`, expected: assertRes.text };
-      }
-    } else if (card.type === 'request') {
-      const parts = endpointParts(card);
-      if (parts) {
-        const payloadCard = jsonBefore[0];
-        let body: unknown;
-        if (payloadCard) {
-          try {
-            body = substituteTemplates(JSON.parse(payloadCard.code), vars);
-          } catch {
-            body = undefined;
-          }
-        }
-        http = await runTargetRequest(parts.method, parts.path, body);
-      } else {
-        await new Promise<void>((r) => setTimeout(r, 420));
-      }
-    } else if (card.sourceType === 'mongo') {
-      // Live mongo query through the framework server; the connection comes from the
-      // project's saved source file (sources/mongo/{name}.md base-url)
-      const started = performance.now();
-      const script = String(substituteTemplates(card.code, vars));
-      if (!card.sourceName) {
-        live = { ok: false, summary: t('mongoNoBaseUrl', { name: '?' }), value: null, ms: 0 };
-      } else {
-        try {
-          const res = await testframeApi.runMongo(slug(projectName), card.sourceName, script, card.timeout);
-          live = {
-            ok: true,
-            summary: `${res.collection}.${res.operation} → ${res.count}`,
-            value: res.result,
-            ms: Math.round(performance.now() - started)
-          };
-        } catch (err) {
-          live = { ok: false, summary: (err as Error).message, value: null, ms: Math.round(performance.now() - started) };
-        }
-      }
-    } else {
-      await new Promise<void>((r) => setTimeout(r, 420));
-    }
-
-    let nextStatus: CardStatus;
-    let logText: string;
-
-    if (assertion) {
-      nextStatus = assertion.passed && !shouldFail ? 'success' : 'error';
-      logText = `${stepLabel} ${card.title}: assert ${assertion.passed ? t('logOk') : t('logAssertFail')} (${JSON.stringify(assertion.actual)} ${assertion.operator ?? ''} ${JSON.stringify(assertion.expected)})`;
-      vars[varKey(card)] = assertion;
-    } else if (live) {
-      nextStatus = live.ok && !shouldFail ? 'success' : 'error';
-      logText = `${stepLabel} ${card.title}: ${card.sourceType} ${live.summary} (${live.ms}ms)`;
-      if (live.ok) {
-        vars[varKey(card)] = live.value;
-        // Feed the step's JSON result card with the real query result
-        const jsonCard = nextJson;
-        if (jsonCard) {
-          updateCard(jsonCard.id, { code: JSON.stringify(live.value, null, 2), endpoint: `mongo • ${live.summary} • ${live.ms}ms` });
-          vars[varKey(jsonCard)] = live.value;
-        }
-      }
-    } else if (http) {
-      nextStatus = http.ok && !shouldFail ? 'success' : 'error';
-      logText = `${stepLabel} ${card.title}: HTTP ${http.status} ${http.statusText} (${http.ms}ms)`;
-      if (http.ok) {
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(http.text);
-        } catch {
-          parsed = http.text;
-        }
-        vars[varKey(card)] = parsed;
-        // Feed the step's JSON result card with the real server response
-        const jsonCard = nextJson;
-        if (jsonCard) {
-          const pretty =
-            typeof parsed === 'string' ? http.text : JSON.stringify(parsed, null, 2);
-          updateCard(jsonCard.id, {
-            code: pretty,
-            endpoint: `${http.status} ${http.statusText} • ${http.ms}ms`
-          });
-          vars[varKey(jsonCard)] = parsed;
-        }
-      }
-    } else {
-      nextStatus = shouldFail ? 'error' : 'success';
-      logText = `${stepLabel} ${card.title}: ${shouldFail ? t('logAssertFail') : t('logOk')}`;
-      // Simulated cards still publish variables so later steps can bind their data
-      if (!shouldFail && card.type === 'json') {
-        try {
-          vars[varKey(card)] = JSON.parse(card.code);
-        } catch {
-          /* contains unresolved templates: keep without publishing */
-        }
-      } else if (!shouldFail && (card.type === 'js' || card.type === 'sql' || card.type === 'jsonassert')) {
-        const resultCard = nextJson;
-        if (resultCard) {
-          try {
-            vars[varKey(card)] = JSON.parse(resultCard.code);
-          } catch {
-            /* not parseable yet */
-          }
-        }
-      }
-    }
-    if (assertion) output = JSON.stringify(assertion, null, 2);
-    // Output is only the payload (JSON when possible); the summary lives in the status line
-    else if (http) output = http.text;
-    else if (live) output = live.ok ? JSON.stringify(live.value, null, 2) : live.summary;
-    else {
-      const published = vars[varKey(card)];
-      output = published === undefined ? t('simulatedRun') : JSON.stringify(published, null, 2);
-    }
-    const result: CardRunResult = { status: nextStatus, text: logText, output, at: elapsedOf(), ranAt: new Date().toISOString() };
-    persistResult(step, card, result);
-    return result;
-  };
-
-  // --- TEST FLOW EXECUTION (live requests, assertions and mongo queries) ---
+  // --- TEST FLOW EXECUTION (server-side runner: POST /api/v2/run) ---
+  // The whole frame executes on the framework server: {{bindings}}, HTTP requests, mongo
+  // scripts and assertions (phase 3). The editor only keeps the optimistic UI state, replays
+  // the per-card results into the canvas, and stores each result next to its card. There is
+  // no client-side fallback: if the server is down, the run fails with an error log.
   const runFlowSimulation = async () => {
     if (isRunning) return;
 
@@ -587,57 +427,61 @@ export default function App({ project, onSwitchProject }: AppProps) {
     setLastRunDuration(null);
     const startTime = performance.now();
 
-    // Reset every card to idle
-    setSteps((prev) =>
-      prev.map((s) => ({
-        ...s,
-        cards: s.cards.map((c) => ({ ...c, status: 'idle' as CardStatus }))
-      }))
-    );
-
-    const logs: ExecLog[] = [];
+    // Reset every card to idle; while the frame runs on the server they all stay idle
+    const idleSteps: Step[] = steps.map((s) => ({
+      ...s,
+      cards: s.cards.map((c) => ({ ...c, status: 'idle' as CardStatus }))
+    }));
+    setSteps(idleSteps);
     setExecutionLogs([{ time: '00:00', text: t('suiteStarting', { name: projectName }), type: 'info' }]);
 
-    // Variables produced by cards, addressable in later steps via {{varName}}
-    const vars: Record<string, unknown> = {};
-    lastVarsRef.current = vars;
-
-    for (const step of steps) {
-      const orderedCards: Card[] = step.cards;
-      for (const card of orderedCards) {
-        setSelectedCardId(card.id);
-        updateCard(card.id, { status: 'running' });
-
-        const elapsedOf = () => `${((performance.now() - startTime) / 1000).toFixed(2)}s`;
-
-        const result = await executeCard(card, step, vars, elapsedOf);
-        const nextStatus = result.status;
-        const logText = result.text;
-        setCardRuns((prev) => ({ ...prev, [card.id]: result }));
-        updateCard(card.id, { status: nextStatus });
-
-        logs.push({ time: elapsedOf(), text: logText, type: nextStatus === 'error' ? 'error' : 'success' });
-        setExecutionLogs([...logs]);
-
-        if (nextStatus === 'error') {
-          setIsRunning(false);
-          setLastRunDuration(elapsedOf());
-          return;
-        }
+    try {
+      const run = await testframeApi.runFrame(slug(projectName), frameName, frameToApi(frameName, idleSteps).steps);
+      const byVar = new Map(run.results.map((r) => [r.varName, r]));
+      const logs: ExecLog[] = [];
+      const runs: Record<string, CardRunResult> = {};
+      const finished: Step[] = idleSteps.map((step) => ({
+        ...step,
+        cards: step.cards.map((card) => {
+          const outcome = byVar.get(cardVarName(card));
+          if (!outcome) return card; // the run stopped before this card: it stays idle
+          const result: CardRunResult = {
+            status: outcome.status, text: outcome.text, output: outcome.output, at: outcome.at, ranAt: outcome.ranAt
+          };
+          runs[card.id] = result;
+          logs.push({ time: result.at, text: result.text, type: result.status === 'error' ? 'error' : 'success' });
+          persistResult(step, card, result);
+          // The server rewrote this card's body (the JSON card that received a response)
+          return outcome.code != null ? { ...card, status: result.status, code: outcome.code } : { ...card, status: result.status };
+        })
+      }));
+      setSteps(finished);
+      setCardRuns((prev) => ({ ...prev, ...runs }));
+      // Variables produced by the run: addressable in later runs and by the card editor
+      lastVarsRef.current = run.vars;
+      const last = run.results[run.results.length - 1];
+      if (last) {
+        const stopped = finished.flatMap((s) => s.cards).find((c) => cardVarName(c) === last.varName);
+        if (stopped) setSelectedCardId(stopped.id);
       }
+      const totalElapsed = `${((performance.now() - startTime) / 1000).toFixed(2)}s`;
+      setLastRunDuration(totalElapsed);
+      const failed = run.results.some((r) => r.status === 'error');
+      setExecutionLogs((prev) => [
+        ...prev,
+        ...logs,
+        { time: totalElapsed, text: failed ? t('runStopped') : t('allPassed'), type: failed ? 'error' : 'success' }
+      ]);
+    } catch (err) {
+      const reason = err instanceof ApiError && err.reason ? err.reason : (err as Error).message;
+      setExecutionLogs((prev) => [...prev, { time: '00:00', text: t('runFail', { msg: reason }), type: 'error' }]);
+    } finally {
+      setIsRunning(false);
     }
-
-    const totalElapsed = `${((performance.now() - startTime) / 1000).toFixed(2)}s`;
-    setLastRunDuration(totalElapsed);
-    setExecutionLogs((prev) => [
-      ...prev,
-      { time: totalElapsed, text: t('allPassed'), type: 'success' }
-    ]);
-    setIsRunning(false);
   };
 
-  // Runs a single card (from the card editor). Bindings resolve against the variables of the
-  // last full run plus the JSON cards placed before this card.
+  // Runs a single card (from the card editor): POST /api/v2/run/card executes it server-side
+  // against the variables of the last run plus the JSON cards placed before it.
   const runCard = async (cardId: string) => {
     if (isRunning) return;
     const ctx = findCardContext(cardId);
@@ -661,19 +505,39 @@ export default function App({ project, onSwitchProject }: AppProps) {
         }
       }
     }
+    // The step's JSON cards around the card: its request payload and its result card
+    const position = step.cards.findIndex((c) => c.id === cardId);
+    const jsonBefore = position >= 0 ? step.cards.slice(0, position).filter((c) => c.type === 'json').reverse() : [];
+    const resultCard = position >= 0 ? step.cards.slice(position + 1).find((c) => c.type === 'json') : undefined;
     setIsRunning(true);
     updateCard(cardId, { status: 'running' });
-    const startTime = performance.now();
-    const elapsedOf = () => `${((performance.now() - startTime) / 1000).toFixed(2)}s`;
     try {
-      const result = await executeCard(ctx.card, step, vars, elapsedOf);
+      const run = await testframeApi.runCard(
+        slug(projectName),
+        step.number,
+        cardToApi(ctx.card),
+        vars,
+        jsonBefore[0]?.code ?? null,
+        resultCard ? { varName: cardVarName(resultCard), code: resultCard.code } : null
+      );
+      const result: CardRunResult = {
+        status: run.result.status, text: run.result.text, output: run.result.output, at: run.result.at, ranAt: run.result.ranAt
+      };
       updateCard(cardId, { status: result.status });
+      // A successful request/mongo run published the result card's variable: mirror the payload
+      if (resultCard && run.vars[cardVarName(resultCard)] !== undefined) {
+        updateCard(resultCard.id, { code: JSON.stringify(run.vars[cardVarName(resultCard)], null, 2) });
+      }
       setCardRuns((prev) => ({ ...prev, [cardId]: result }));
       setExecutionLogs((prev) => [...prev, { time: result.at, text: result.text, type: result.status === 'error' ? 'error' : 'success' }]);
-      lastVarsRef.current = vars;
+      lastVarsRef.current = run.vars;
+      persistResult(step, ctx.card, result);
     } catch (err) {
+      // No client-side fallback: without the server the card run just fails with the reason
+      const reason = err instanceof ApiError && err.reason ? err.reason : (err as Error).message;
       updateCard(cardId, { status: 'error' });
-      setCardRuns((prev) => ({ ...prev, [cardId]: { status: 'error', text: (err as Error).message, output: String(err), at: elapsedOf() } }));
+      setCardRuns((prev) => ({ ...prev, [cardId]: { status: 'error', text: reason, output: reason, at: '0.00s' } }));
+      setExecutionLogs((prev) => [...prev, { time: '00:00', text: reason, type: 'error' }]);
     } finally {
       setIsRunning(false);
     }

@@ -1,7 +1,6 @@
 import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { HTTP_METHODS, checkSourceCode } from '../catalog';
-import { endpointParts } from '../frames';
 import { useI18n } from '../i18n';
 import type { Card, SourceDef } from '../types';
 
@@ -99,10 +98,18 @@ function ScriptPicker({ card, source, onChange }: SourceFormProps) {
   );
 }
 
-// METHOD + path, stored together in `endpoint` ("POST /api/v2/echo")
+// METHOD + path, stored together in `endpoint` ("POST /api/v2/echo"). Pure form display:
+// the endpoint string is the wire format, and the runner (server-side since phase 3) parses
+// it itself; here the METHOD and the path are only edited as two fields.
 function MethodPath({ card, onChange }: Pick<SourceFormProps, 'card' | 'onChange'>) {
   const { t } = useI18n();
-  const parts = endpointParts(card);
+  const trimmed = String(card.endpoint || '').trim();
+  const match = trimmed.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)$/i);
+  const parts = match
+    ? { method: match[1].toUpperCase(), path: match[2] }
+    : card.httpMethod && trimmed.startsWith('/')
+      ? { method: String(card.httpMethod).toUpperCase(), path: trimmed }
+      : null;
   const method = parts?.method ?? (card.httpMethod || 'GET');
   const path = parts?.path ?? card.endpoint.replace(/^(GET|POST|PUT|PATCH|DELETE)\s+/i, '');
   const set = (m: string, p: string) => onChange({ httpMethod: m, endpoint: `${m} ${p}`.trim() });

@@ -59,19 +59,6 @@ export interface ExecLog {
   type: LogLevel;
 }
 
-export interface HttpResult {
-  ok: boolean;
-  status: number;
-  statusText: string;
-  ms: number;
-  text: string;
-}
-
-export interface EndpointParts {
-  method: string;
-  path: string;
-}
-
 export interface SelectedContext {
   card: Card;
   stepId: string;

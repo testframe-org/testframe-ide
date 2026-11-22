@@ -1,4 +1,4 @@
-import type { CardRunResult, CatalogResponse, FrameData, FramesLoadResponse, FramesSaveResponse, SourceDef } from '../types';
+import type { CardData, CardRunResult, CatalogResponse, FrameData, FramesLoadResponse, FramesSaveResponse, SourceDef, StepData } from '../types';
 import { requestJson } from './http';
 
 export interface HealthResponse {
@@ -15,12 +15,30 @@ export interface ProjectSummary {
   lastModified: string; // ISO instant
 }
 
-// POST /api/v2/run/mongo: a mongo source script executed by the framework server
-export interface MongoRunResponse {
-  operation: string;
-  collection: string;
-  count: number;
-  result: unknown;
+// POST /api/v2/run and /api/v2/run/card: the server-side card runner ({{bindings}}, HTTP
+// requests, mongo scripts, assertions). One outcome per executed card; `code` is set when the
+// run rewrote that card's body (the JSON result card that received a response), and `vars`
+// carries every variable the run published.
+export interface CardRunOutcome {
+  varName: string;
+  status: 'success' | 'error';
+  text: string;
+  output: string;
+  at: string;
+  ranAt: string;
+  code: string | null;
+}
+
+export interface FrameRunResponse {
+  project: string;
+  frame: string;
+  results: CardRunOutcome[];
+  vars: Record<string, unknown>;
+}
+
+export interface CardRunResponse {
+  result: CardRunOutcome;
+  vars: Record<string, unknown>;
 }
 
 export interface SourcesLoadResponse {
@@ -49,9 +67,6 @@ export const testframeApi = {
 
   listProjects: () => requestJson<ProjectSummary[]>('/api/v2/projects'),
 
-  echo: (payload: unknown) =>
-    requestJson<Record<string, unknown>>('/api/v2/echo', json('POST', payload)),
-
   // Replaces frames/{slug(frame.name)}/ (validated and serialized by the server; 400 with the reason)
   saveFrames: (project: string, frame: FrameData) =>
     requestJson<FramesSaveResponse>('/api/v2/frames', json('POST', { project, frame })),
@@ -70,8 +85,20 @@ export const testframeApi = {
   loadSources: (project: string) =>
     requestJson<SourcesLoadResponse>(`/api/v2/sources/${encodeURIComponent(project)}`),
 
-  // Runs a read-only mongo script (db.<collection>.find|findOne|aggregate|countDocuments|distinct).
-  // The server reads the connection from the project's sources/mongo/{source}.md (base-url).
-  runMongo: (project: string, source: string, script: string, timeoutMs?: number) =>
-    requestJson<MongoRunResponse>('/api/v2/run/mongo', json('POST', { project, source, script, timeoutMs }))
+  // Runs the whole frame on the server: cards execute in the sent order (steps, then the
+  // step's array order), bindings and HTTP requests included, stopping at the first error card
+  runFrame: (project: string, frame: string, steps: StepData[]) =>
+    requestJson<FrameRunResponse>('/api/v2/run', json('POST', { project, frame, steps })),
+
+  // Runs one card (the card editor's Run button) with the variables the editor already has.
+  // `payload` is the code of the nearest JSON card before it; `resultCard` the first JSON card
+  // after it: a successful run publishes its variable and the editor rewrites the card from it
+  runCard: (
+    project: string,
+    step: number,
+    card: CardData,
+    vars: Record<string, unknown>,
+    payload: string | null,
+    resultCard: { varName: string; code: string } | null
+  ) => requestJson<CardRunResponse>('/api/v2/run/card', json('POST', { project, step, card, vars, payload, resultCard }))
 };
