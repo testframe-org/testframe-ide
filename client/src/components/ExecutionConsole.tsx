@@ -1,6 +1,6 @@
 import { Terminal } from 'lucide-react';
 import { useI18n } from '../i18n';
-import type { ExecLog } from '../types';
+import type { ExecLog } from '../client-api/testframe.z';
 
 interface ExecutionConsoleProps {
   logs: ExecLog[];

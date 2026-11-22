@@ -10,7 +10,7 @@ import {
 import { highlightSyntax, languageOf } from '../highlight';
 import { RunOutput } from './RunOutput';
 import { useI18n } from '../i18n';
-import type { Card, CardRunResult, ResizeDirection } from '../types';
+import type { Card, CardRunResult, ResizeDirection } from '../client-api/testframe.z';
 
 interface TestBlockCardProps {
   card: Card;

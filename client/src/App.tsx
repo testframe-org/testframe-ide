@@ -43,7 +43,7 @@ import type {
   SelectedContext,
   SourceDef,
   Step
-} from './types';
+} from './client-api/testframe.z';
 
 // ============================================================================
 // MAIN COMPONENT

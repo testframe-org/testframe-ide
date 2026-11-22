@@ -1,7 +1,7 @@
 import React from 'react';
 import { Trash2 } from 'lucide-react';
 import { useI18n } from '../i18n';
-import type { Card, CardRunResult, ResizeDirection, Step } from '../types';
+import type { Card, CardRunResult, ResizeDirection, Step } from '../client-api/testframe.z';
 import { AddBlockCircleButton } from './AddBlockCircleButton';
 import { ConnectorArrow } from './ConnectorArrow';
 import { TestBlockCard } from './TestBlockCard';

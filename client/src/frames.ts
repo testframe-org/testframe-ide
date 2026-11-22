@@ -1,4 +1,4 @@
-import type { Card, CardData, CardRunResult, CardType, Frame, FrameData, FramesLoadResponse, Step } from './types';
+import type { Card, CardData, CardRunResult, CardType, Frame, FrameData, FramesLoadResponse, Step } from './client-api/testframe.z';
 import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT } from './catalog';
 
 // ============================================================================

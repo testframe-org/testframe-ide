@@ -12,7 +12,7 @@ import {
 import { SOURCE_TYPES, cardTypeOf } from '../catalog';
 import { cardVarName, normalizeVarName } from '../frames';
 import { useI18n } from '../i18n';
-import type { Card, CardRunResult, SelectedContext, SourceDef } from '../types';
+import type { Card, CardRunResult, SelectedContext, SourceDef } from '../client-api/testframe.z';
 import { RunOutput } from './RunOutput';
 import { SourceForm, formKindOf } from './SourceForm';
 

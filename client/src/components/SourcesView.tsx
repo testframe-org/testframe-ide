@@ -3,7 +3,7 @@ import { Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle, FileCode2 } from '
 import { ApiError, testframeApi } from '../client-api';
 import { SOURCE_TYPES, hasScripts } from '../catalog';
 import { useI18n } from '../i18n';
-import type { LogLevel, SourceDef, SourceScript } from '../types';
+import type { LogLevel, SourceDef, SourceScript } from '../client-api/testframe.z';
 
 interface SourcesViewProps {
   project: string;

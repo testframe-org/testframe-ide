@@ -29,8 +29,10 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   `DEFAULT_CARD_SIZE`/`DEFAULT_TIMEOUT`, `cardTypeOf` and `hasScripts`; `checkSourceCode()`
   answers the per-type code rule via `POST /api/v2/validate` (cached per code). No client
   copies of these rules exist anymore.
-- `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `HttpResult`...) and the wire
-  shapes (`CardData`, `FrameData`, `FramesLoadResponse`, `CatalogEntry`, `CatalogResponse`)
+- `src/client-api/testframe.z.ts` — **every shape of the client as one zod file**: the editor
+  model (`Card`, `Step`, `Frame`...), the wire shapes (`CardData`, `FrameData`, `SourceDef`,
+  `CatalogEntry`...) and the framework API responses; types are `z.infer`red here, imports use
+  this file directly (there is no `types.ts` anymore)
 
 ## Commands
 

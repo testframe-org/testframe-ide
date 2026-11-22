@@ -1,4 +1,4 @@
-import type { CardType, CatalogEntry, CatalogResponse } from './types';
+import type { CardType, CatalogEntry, CatalogResponse } from './client-api/testframe.z';
 import { testframeApi } from './client-api/testframe';
 
 // ============================================================================

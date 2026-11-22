@@ -2,7 +2,7 @@ import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { HTTP_METHODS, checkSourceCode } from '../catalog';
 import { useI18n } from '../i18n';
-import type { Card, SourceDef } from '../types';
+import type { Card, SourceDef } from '../client-api/testframe.z';
 
 // ============================================================================
 // SOURCE-SPECIFIC FORMS: each type-source has its own way of filling a card

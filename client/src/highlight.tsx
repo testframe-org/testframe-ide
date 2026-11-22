@@ -1,4 +1,4 @@
-import type { Card } from './types';
+import type { Card } from './client-api/testframe.z';
 
 // --- LIGHTWEIGHT SYNTAX HIGHLIGHTING ---
 // Single-pass tokenizer per language: each line is split into tokens by one combined regex,
