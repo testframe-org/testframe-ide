@@ -117,4 +117,25 @@ class ProjectFileStoreTest {
         assertEquals(1, projects.getFirst().frames());
         assertEquals(1, projects.getFirst().sources());
     }
+
+    @Test
+    void resultFilesFollowTheirCardAndAreGitignored() throws Exception {
+        ProjectFileStore store = new ProjectFileStore(root.toString());
+        store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
+                new FrameFile("main/step-1/a-card.md", "a"),
+                new FrameFile("main/step-1/b-card.md", "b")));
+        store.saveResult("demo", "main/step-1/a-card.result-data.md", "ok");
+        store.saveResult("demo", "main/step-1/b-card.result-data.md", "ok");
+        store.saveResult("demo", "main/step-1/b-card.result-data.md", "ok again");
+        assertThrows(ResponseStatusException.class, () -> store.saveResult("demo", "main/step-1/a-card.md", "x"));
+
+        // saving the frame without b-card keeps a's result and drops b's
+        store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
+                new FrameFile("main/step-1/a-card.md", "a")));
+
+        assertTrue(Files.exists(frames().resolve("main/step-1/a-card.result-data.md")));
+        assertFalse(Files.exists(frames().resolve("main/step-1/b-card.result-data.md")));
+        String gitignore = Files.readString(root.resolve("demo/testframe/.gitignore"));
+        assertEquals(1, gitignore.lines().filter("*.result-data.md"::equals).count());
+    }
 }

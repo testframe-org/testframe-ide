@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
-import { HTTP_METHODS, endpointParts } from '../frames';
+import { HTTP_METHODS, endpointParts, validateSourceCode } from '../frames';
 import { useI18n } from '../i18n';
 import type { Card, SourceDef } from '../types';
 
@@ -134,12 +134,13 @@ function jsonStatus(text: string): { ok: boolean; message: string } {
   }
 }
 
-const ASSERT_LINE_RE = /^assert\s+.+\s(==|!=|>=|<=|>|<)\s.+$/;
 
 export function SourceForm({ card, source, onChange }: SourceFormProps) {
   const { t } = useI18n();
   const kind = formKindOf(card.sourceType || 'inline');
   const setCode = (code: string) => onChange({ code });
+  // Per-type rule (mongo: one shell call, oracle: one SELECT, assert: jsonassert lines)
+  const problem = validateSourceCode(card.sourceType || 'inline', card.code);
 
   switch (kind) {
     case 'http': {
@@ -185,13 +186,20 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
           <ScriptPicker card={card} source={source} onChange={onChange} />
           <div>
             <Label>{t('queryLabel')}</Label>
-            <Editor value={card.code} onChange={setCode} rows={14} placeholder="db.products.find({ ativo: true })" />
+            <Editor
+              value={card.code}
+              onChange={setCode}
+              rows={14}
+              placeholder={card.sourceType === 'mongo' ? 'db.products.find({ ativo: true })' : 'SELECT * FROM products WHERE ativo = 1'}
+            />
+            {card.code.trim() && (
+              <Status ok={!problem} text={problem ?? t('codeRuleOk', { type: card.sourceType })} />
+            )}
           </div>
         </div>
       );
     case 'assert': {
       const lines = card.code.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//'));
-      const bad = lines.filter((l) => !ASSERT_LINE_RE.test(l));
       return (
         <div className="space-y-3">
           <ScriptPicker card={card} source={source} onChange={onChange} />
@@ -200,10 +208,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
             <Editor value={card.code} onChange={setCode} rows={10} placeholder="assert $count(items) > 0" />
             <p className="mt-1 text-[11px] text-slate-500 font-mono">{t('assertHint')}</p>
             {lines.length > 0 && (
-              <Status
-                ok={bad.length === 0}
-                text={bad.length === 0 ? t('assertLinesOk', { n: lines.length }) : t('assertLinesBad', { line: bad[0]! })}
-              />
+              <Status ok={!problem} text={problem ?? t('assertLinesOk', { n: lines.length })} />
             )}
           </div>
         </div>

@@ -1,8 +1,6 @@
 -------------------
 title: Assert active products
-type: validation
-phase: post
-order: 2
+order: 3
 source: assert/assertions-core
 timeout: 1000
 --------body----------

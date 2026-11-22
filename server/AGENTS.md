@@ -11,7 +11,8 @@ All code comments and messages are in English.
 | `GET /api/v2/health` | service status |
 | `POST /api/v2/echo` | generic target for in-test flow requests (201 with `request_id`) |
 | `POST /api/v2/frames` | replaces frame directories (`{frame}/step-{n}/{var-file}.md`) |
-| `GET /api/v2/frames/{project}` | reads saved frames |
+| `GET /api/v2/frames/{project}` | reads saved frames (cards, private files and `*.result-data.md`) |
+| `POST /api/v2/frames/results` | `{project, path, content}`: stores a card's last run (`{frame}/step-{n}/{var-file}.result-data.md`) and ensures `testframe/.gitignore` ignores result files |
 | `POST /api/v2/sources` | replaces sources (`{type}/{name}.md`, `{name}.private.md`, `{name}/{script}.md`) |
 | `GET /api/v2/sources/{project}` | reads sources |
 | `GET /api/v2/projects` | projects under the projects dir (folders with `testframe/`), most recent first |

@@ -1,8 +1,6 @@
 -------------------
 title: Assert echo
-type: validation
-phase: post
-order: 2
+order: 4
 source: assert/assertions-core
 script: assertEchoProcessed
 timeout: 1000

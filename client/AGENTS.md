@@ -35,6 +35,9 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
 
 ## Conventions
 
+- No built-in project data: sources (and frames) come only from the project's files under
+  `{project}/testframe/`. Hardcoded `SourceDef`s are allowed only as test mocks (e.g. `scripts/smoke.ts`).
+
 - Strict TS: no implicit `any` in new params; component props typed via interfaces.
 - Anything crossing the wire (frame frontmatter, sources) is validated with zod before
   send/accept. Schema errors surface in the execution console, never as silent crashes.
@@ -49,6 +52,8 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
   (`ProjectPicker`) lists recent projects (localStorage) and every project from `GET /api/v2/projects`,
   and can create a new one. The header's project icon goes back to it. The storage directory is
   always `slug(projectName)`; the app auto-loads saved frames/sources.
+- Every run stores the card's last result (`{var-file}.result-data.md`, gitignored) and shows it
+  under the card's script on the canvas; results reload with the project.
 - `mongo` cards run live through `POST /api/v2/run/mongo` (the server reads the connection from the
   saved source file); request and assert cards also run live; other source types are simulated.
 - The top tabs switch between Frames (canvas) and Sources (registry). There is no side inspector:

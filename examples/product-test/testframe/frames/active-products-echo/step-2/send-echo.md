@@ -1,7 +1,5 @@
 -------------------
 title: Send to framework echo
-type: request
-phase: pre
 order: 2
 source: restapi/framework-echo-api
 script: sendEcho

@@ -1,7 +1,5 @@
 -------------------
 title: Echo payload
-type: json
-phase: pre
 order: 1
 timeout: 2000
 --------body----------

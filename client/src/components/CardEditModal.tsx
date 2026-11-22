@@ -2,8 +2,6 @@ import { useEffect } from 'react';
 import {
   CheckCircle2,
   Clock,
-  Database,
-  FileJson,
   Loader2,
   Play,
   Sliders,
@@ -11,9 +9,10 @@ import {
   X,
   XCircle
 } from 'lucide-react';
-import { SOURCE_TYPES, cardVarName, normalizeVarName } from '../frames';
+import { SOURCE_TYPES, cardTypeOf, cardVarName, normalizeVarName } from '../frames';
 import { useI18n } from '../i18n';
-import type { Card, CardRunResult, CardType, SelectedContext, SourceDef } from '../types';
+import type { Card, CardRunResult, SelectedContext, SourceDef } from '../types';
+import { RunOutput } from './RunOutput';
 import { SourceForm, formKindOf } from './SourceForm';
 
 interface CardEditModalProps {
@@ -92,15 +91,6 @@ export function CardEditModal({
             <span className="normal-case font-mono font-medium text-slate-500 truncate">· {cardVarName(card)}</span>
           </span>
           <div className="flex items-center gap-2 shrink-0">
-            <span
-              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                selectedContext.phaseKey === 'preCards'
-                  ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                  : 'bg-teal-50 text-teal-700 border border-teal-200'
-              }`}
-            >
-              {selectedContext.phaseKey === 'preCards' ? t('phasePre') : t('phasePost')}
-            </span>
             <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-slate-100 text-slate-600">
               {t('stepN', { n: selectedContext.stepNumber })}
             </span>
@@ -150,36 +140,6 @@ export function CardEditModal({
               )}
             </div>
 
-            {/* Block type */}
-            <div className="space-y-2">
-              <span className={`${sectionCls} block`}>{t('blockType')}</span>
-              <div className="grid grid-cols-2 gap-1.5">
-                {[
-                  { id: 'request', label: t('typeRequest'), icon: Loader2 },
-                  { id: 'script', label: t('typeScript'), icon: Database },
-                  { id: 'json', label: t('typeJson'), icon: FileJson },
-                  { id: 'validation', label: t('typeValidation'), icon: CheckCircle2 }
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const active = card.type === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      onClick={() => update({ type: item.id as CardType })}
-                      className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg border text-xs font-medium transition-all ${
-                        active
-                          ? 'border-blue-600 bg-blue-50/70 text-blue-700 shadow-2xs'
-                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Icon className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {/* Source */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
@@ -192,7 +152,7 @@ export function CardEditModal({
                 <label className="block text-xs font-medium text-slate-600 mb-1">type-source</label>
                 <select
                   value={sourceType}
-                  onChange={(e) => update({ sourceType: e.target.value, sourceName: '', script: undefined })}
+                  onChange={(e) => update({ sourceType: e.target.value, type: cardTypeOf(e.target.value), sourceName: '', script: undefined })}
                   className={inputCls}
                 >
                   {SOURCE_TYPES.map((type) => (
@@ -344,9 +304,10 @@ export function CardEditModal({
                 <p className={`text-xs font-medium ${lastRun.status === 'error' ? 'text-rose-700' : 'text-emerald-700'}`}>
                   {lastRun.text}
                 </p>
-                <pre className="max-h-56 overflow-auto bg-[#191B24] text-slate-100 font-mono text-[11px] leading-5 p-3 rounded-lg whitespace-pre-wrap break-all select-text">
-                  {lastRun.output}
-                </pre>
+                <RunOutput
+                  output={lastRun.output}
+                  className="max-h-56 overflow-auto bg-[#191B24] text-slate-100 text-[11px] leading-5 p-3 rounded-lg"
+                />
               </div>
             )}
 

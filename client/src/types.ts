@@ -1,6 +1,5 @@
 export type CardType = 'request' | 'script' | 'json' | 'validation';
 export type CardStatus = 'idle' | 'running' | 'success' | 'error';
-export type PhaseKey = 'preCards' | 'postCards';
 export type ResizeDirection = 'right' | 'bottom' | 'corner';
 export type LogLevel = 'info' | 'success' | 'error';
 
@@ -18,6 +17,7 @@ export interface Card {
   sourceType: string;
   sourceName: string;
   script?: string; // camelCase name of a script of the card's source; empty body on disk = inherit it
+  resultHeight?: number; // px of the last-run panel under the script (absent = default)
   privateData?: string; // body of {var-file}.private.md (gitignored; falls back to .private.example.md)
   httpMethod: string;
 }
@@ -28,14 +28,13 @@ export interface CardRunResult {
   text: string; // one-line log
   output: string; // response / assertion result / simulated note
   at: string; // elapsed time label
+  ranAt?: string; // ISO timestamp of the run
 }
 
 export interface Step {
   id: string;
   number: number;
-  splitRatio: number;
-  preCards: Card[];
-  postCards: Card[];
+  cards: Card[]; // execution order, left to right
 }
 
 export interface SourceScript {
@@ -97,7 +96,6 @@ export interface SelectedContext {
   card: Card;
   stepId: string;
   stepNumber: number;
-  phaseKey: PhaseKey;
 }
 
 export interface FramesSaveResponse {

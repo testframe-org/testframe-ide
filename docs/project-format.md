@@ -52,9 +52,7 @@ duplicate var-names within a frame, because var-names are the binding identity.
 | Key | Required | Meaning |
 |---|---|---|
 | `title` | yes | display name on the canvas (free text) |
-| `type` | yes | `request` \| `script` \| `json` \| `validation` |
-| `phase` | yes | `pre` \| `post` (column inside the step) |
-| `order` | yes | 1-based position inside the phase |
+| `order` | yes | 1-based position inside the step (cards run left to right) |
 | `source` | no | `{type-source}/{name-source}` (or just `{type-source}`); omitted = inline |
 | `script` | no | camelCase script of `source`; empty body = inherit it |
 | `endpoint` | no | `METHOD /path` for requests (HTTP method is parsed from it) |
@@ -62,7 +60,9 @@ duplicate var-names within a frame, because var-names are the binding identity.
 | `size` | no | `{width}x{height}`, only when different from the type default |
 
 Derived, never stored: card id (`{frame}/step-{n}/{var-file}`), step id/number,
-var-name, http-method.
+var-name, http-method, and the card type, which follows the source type (`cardTypeOf`):
+restapi/graphql/swagger → request, assert → validation, inline (no `source`) → json,
+everything else (mongo, SQL types, filter, mapper…) → script.
 
 ## Sources: `sources/{type-source}/{name-source}.md`
 
@@ -82,6 +82,32 @@ var-name, http-method.
   template: it is loaded when the private file is missing, and the next save writes the
   real `.private.md`. The server never deletes `*.private.example.md`.
 - `bun run example:push` ships the example project with templates only.
+
+## Last run: `{var-file}.result-data.md`
+
+After a card runs (whole flow or the card editor's Run), the editor stores its last result next
+to it: frontmatter `status`, `ran-at`, `elapsed`, `summary`; the body is the output (HTTP
+response, assertion result, mongo documents). The server adds `*.result-data.md` to the
+project's `testframe/.gitignore`, keeps a result while its card exists and deletes it with the
+card. The editor shows it under the card's script and in the card editor.
+
+## Code rules per source type
+
+`validateSourceCode` in `client/src/frames.ts` is enforced in the card editor, before a run, on
+frame save and on source save (scripts):
+
+| type-source | Accepted code |
+|---|---|
+| `mongo` | one mongo shell call: `db.<collection>.find\|findOne\|aggregate\|countDocuments\|distinct(...)`, optional `.sort/.skip/.limit`, `//` comments |
+| `oracle` | one `SELECT` statement, `--` comments |
+| `assert` | jsonassert lines only: `assert <expr> (==\|!=\|>\|>=\|<\|<=) <expr>`, `//` comments |
+
+## Execution order
+
+A step is one ordered sequence of cards (no pre/post phases). Cards run by `order`. A request
+body and an assertion input come from the nearest `json` card **before** the card; a request or
+mongo result is written into the first `json` card **after** it and published as the card's
+variable.
 
 ## Bindings and references
 
@@ -119,8 +145,6 @@ sources/
 # frames/active-products-echo/step-1/get-active-products.md
 -------------------
 title: Get active products
-type: script
-phase: pre
 order: 1
 source: mongo/products-db
 script: getActiveProducts

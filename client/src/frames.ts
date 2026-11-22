@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import type {
   Card,
+  CardRunResult,
   CardType,
   EndpointParts,
   Frame,
   FrameFile,
-  PhaseKey,
   RawSource,
   ScriptFile,
   SourceDef,
@@ -54,7 +54,6 @@ export const SOURCE_TYPES = [
 
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 
-const CARD_TYPES: CardType[] = ['request', 'script', 'json', 'validation'];
 
 // Frame used when a project has none yet
 export const DEFAULT_FRAME = 'main';
@@ -114,6 +113,69 @@ const camelName = (what: string) =>
     .regex(/^[a-z][a-zA-Z0-9]*$/, `${what} must be camelCase`)
     .refine(isRoundTripName, `${what} must survive the kebab-case file name (no consecutive capitals)`);
 
+// --- CODE RULES PER SOURCE TYPE ---
+// mongo: one mongo shell call; oracle: one SELECT; assert: jsonassert lines only.
+// Returns the problem, or null when the code is acceptable (empty code is a draft: allowed).
+const MONGO_OPS = ['find', 'findOne', 'aggregate', 'countDocuments', 'distinct'];
+const MONGO_CALL_RE = /^db\.[A-Za-z_$][\w$-]*\.([A-Za-z]+)\s*\(/;
+const ASSERT_LINE_RE = /^assert\s+.+\s(==|!=|>=|<=|>|<)\s.+$/;
+
+const stripLineComments = (code: string, marker: string): string =>
+  code
+    .split('\n')
+    .filter((line) => !line.trim().startsWith(marker))
+    .join('\n')
+    .trim();
+
+const balanced = (text: string): boolean => {
+  let depth = 0;
+  let quote = '';
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '(' || ch === '[' || ch === '{') depth++;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      if (--depth < 0) return false;
+    }
+  }
+  return depth === 0 && !quote;
+};
+
+export const validateSourceCode = (sourceType: string, code: string): string | null => {
+  switch (sourceType) {
+    case 'mongo': {
+      const body = stripLineComments(code, '//');
+      if (!body) return null;
+      const m = body.match(MONGO_CALL_RE);
+      if (!m) return 'mongo cards accept one mongo shell call, e.g. db.products.find({ ativo: true })';
+      if (!MONGO_OPS.includes(m[1]!)) return `mongo operation "${m[1]}" is not allowed (${MONGO_OPS.join(', ')})`;
+      if (!balanced(body)) return 'unbalanced brackets or quotes';
+      const tail = body.replace(/;\s*$/, '');
+      if (!tail.endsWith(')')) return 'the mongo call must end with ")"';
+      if (/;/.test(tail.replace(/(["'])(?:\\.|(?!\1).)*\1/g, ''))) return 'only one mongo call is allowed';
+      return null;
+    }
+    case 'oracle': {
+      const body = stripLineComments(code, '--');
+      if (!body) return null;
+      if (!/^select\b/i.test(body)) return 'oracle cards accept a single SELECT statement';
+      const statement = body.replace(/;\s*$/, '');
+      if (/;/.test(statement.replace(/'(?:''|[^'])*'/g, ''))) return 'only one SELECT statement is allowed';
+      return null;
+    }
+    case 'assert': {
+      const lines = code.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('//'));
+      const bad = lines.find((l) => !ASSERT_LINE_RE.test(l));
+      return bad ? `not a jsonassert line: ${bad}` : null;
+    }
+    default:
+      return null;
+  }
+};
+
 // --- SCHEMAS (zod) ---
 export const sourceSchema = z.object({
   typeSource: z.enum(SOURCE_TYPES),
@@ -132,6 +194,11 @@ export const sourceSchema = z.object({
       })
     )
     .default([])
+}).superRefine((source, ctx) => {
+  source.scripts.forEach((script, i) => {
+    const problem = validateSourceCode(source.typeSource, script.body);
+    if (problem) ctx.addIssue({ code: 'custom', path: ['scripts', i, 'body'], message: `${script.name}: ${problem}` });
+  });
 });
 
 // {name}.md frontmatter: base-url is the only source fact the path cannot express.
@@ -146,13 +213,14 @@ const FRAME_PATH_RE = /^([a-z0-9][a-z0-9-]*)\/step-(\d+)\/([a-z0-9][a-z0-9-]*)\.
 // frames/{frame}/step-{n}/{var-file}.private.md | .private.example.md
 const PRIVATE_PATH_RE = /^([a-z0-9][a-z0-9-]*\/step-\d+\/[a-z0-9][a-z0-9-]*)\.private(\.example)?\.md$/;
 export const PRIVATE_SUFFIX = '.private.md';
+// frames/{frame}/step-{n}/{var-file}.result-data.md: last run of that card (gitignored)
+export const RESULT_SUFFIX = '.result-data.md';
+const RESULT_PATH_RE = /^([a-z0-9][a-z0-9-]*\/step-\d+\/[a-z0-9][a-z0-9-]*)\.result-data\.md$/;
 export const PRIVATE_EXAMPLE_SUFFIX = '.private.example.md';
 
 export const cardFrontmatterSchema = z
   .object({
     title: z.string().min(1),
-    type: z.enum(CARD_TYPES as [CardType, ...CardType[]]),
-    phase: z.enum(['pre', 'post']),
     order: z.coerce.number().int().min(1),
     source: z
       .string()
@@ -165,15 +233,31 @@ export const cardFrontmatterSchema = z
     size: z
       .string()
       .regex(/^\d+x\d+$/, 'size must be {width}x{height}')
-      .optional()
+      .optional(),
+    'result-height': z.coerce.number().int().min(24).max(600).optional()
   })
   .refine((f) => !f.script || (f.source ?? '').includes('/'), {
     message: 'script requires source: {type-source}/{name-source}',
     path: ['script']
   });
 
-export const defaultSourceType = (type: CardType): string =>
-  ({ request: 'restapi', script: 'mongo', json: 'inline', validation: 'assert' })[type] || 'inline';
+// The card type is never stored nor picked: it follows the card's source type
+// (it drives the default size/timeout and how the card runs).
+export const cardTypeOf = (sourceType: string): CardType => {
+  switch (sourceType) {
+    case 'restapi':
+    case 'graphql':
+    case 'swagger':
+      return 'request';
+    case 'assert':
+      return 'validation';
+    case 'inline':
+    case '':
+      return 'json';
+    default:
+      return 'script'; // mongo, SQL types, filter, mapper, kafka, grpc
+  }
+};
 
 // --- HELPERS ---
 export const endpointParts = (card: Pick<Card, 'endpoint' | 'httpMethod'>): EndpointParts | null => {
@@ -227,7 +311,7 @@ export const findScript = (
 };
 
 // --- CARDS: frames/{frame}/step-{n}/{var-file}.md ---
-export const cardToMd = (card: Card, phase: 'pre' | 'post', order: number, sources: SourceDef[] = []): string => {
+export const cardToMd = (card: Card, order: number, sources: SourceDef[] = []): string => {
   const size = DEFAULT_CARD_SIZE[card.type];
   const customSize = card.width !== size.width || card.height !== size.height;
   // A card bound to a source script stores an empty body while it still matches the script
@@ -236,14 +320,13 @@ export const cardToMd = (card: Card, phase: 'pre' | 'post', order: number, sourc
   return renderMd(
     [
       ['title', card.title.trim() || card.varName],
-      ['type', card.type],
-      ['phase', phase],
       ['order', order],
       ['source', sourceRef(card)],
       ['script', card.script || undefined],
       ['endpoint', card.endpoint.trim() || undefined],
       ['timeout', card.timeout],
-      ['size', customSize ? `${card.width}x${card.height}` : undefined]
+      ['size', customSize ? `${card.width}x${card.height}` : undefined],
+      ['result-height', card.resultHeight]
     ],
     inherits ? '' : card.code
   );
@@ -258,8 +341,7 @@ export const buildFrameFiles = (frame: string, steps: Step[], sources: SourceDef
   const seen = new Map<string, string>();
   const files: FrameFile[] = [];
   steps.forEach((step, stepIdx) => {
-    for (const phaseKey of ['preCards', 'postCards'] as PhaseKey[]) {
-      step[phaseKey].forEach((card, idx) => {
+    step.cards.forEach((card, idx) => {
         const varName = cardVarName(card);
         if (!isRoundTripName(varName)) {
           throw new Error(`var-name "${varName}" cannot be stored; use "${normalizeVarName(varName)}"`);
@@ -269,23 +351,24 @@ export const buildFrameFiles = (frame: string, steps: Step[], sources: SourceDef
           throw new Error(`var-name "${varName}" is used twice (${seen.get(varName)} and ${where})`);
         }
         seen.set(varName, where);
+        const problem = validateSourceCode(card.sourceType, card.code);
+        if (problem) throw new Error(`${where}: ${problem}`);
         const base = `${frameDir}/step-${stepIdx + 1}/${varNameToFileName(varName)}`;
         files.push({
           path: `${base}.md`,
-          content: cardToMd(card, phaseKey === 'preCards' ? 'pre' : 'post', idx + 1, sources)
+          content: cardToMd(card, idx + 1, sources)
         });
         if (card.privateData?.trim()) {
           files.push({ path: `${base}${PRIVATE_SUFFIX}`, content: renderMd([], card.privateData) });
         }
-      });
-    }
+    });
   });
   return files;
 };
 
 export type CardParseResult =
   | { ok: false; errors: string[] }
-  | { ok: true; frame: string; stepNumber: number; phase: 'pre' | 'post'; order: number; card: Card; warnings: string[] };
+  | { ok: true; frame: string; stepNumber: number; order: number; card: Card; warnings: string[] };
 
 export const parseCardFile = (file: FrameFile, sources: SourceDef[] = []): CardParseResult => {
   const pathMatch = file.path.match(FRAME_PATH_RE);
@@ -304,20 +387,22 @@ export const parseCardFile = (file: FrameFile, sources: SourceDef[] = []): CardP
   const f = parsed.data;
   const [sourceType, sourceName = ''] = (f.source ?? 'inline').split('/');
   const size = f.size?.split('x').map(Number) ?? [];
+  const type = cardTypeOf(sourceType);
   const card: Card = {
     id: `${frame}/step-${stepNo}/${fileBase}`,
     title: f.title,
     varName: fileNameToVarName(fileBase),
-    type: f.type,
-    width: size[0] ?? DEFAULT_CARD_SIZE[f.type].width,
-    height: size[1] ?? DEFAULT_CARD_SIZE[f.type].height,
-    timeout: f.timeout ?? DEFAULT_TIMEOUT[f.type],
+    type,
+    width: size[0] ?? DEFAULT_CARD_SIZE[type].width,
+    height: size[1] ?? DEFAULT_CARD_SIZE[type].height,
+    timeout: f.timeout ?? DEFAULT_TIMEOUT[type],
     status: 'idle',
     endpoint: f.endpoint ?? '',
     code,
     sourceType,
     sourceName,
     script: f.script,
+    resultHeight: f['result-height'],
     httpMethod: ''
   };
   card.httpMethod = endpointParts(card)?.method ?? '';
@@ -328,20 +413,50 @@ export const parseCardFile = (file: FrameFile, sources: SourceDef[] = []): CardP
     if (!script) warnings.push(`script "${card.script}" not found in source ${f.source}`);
     else if (!code.trim()) card.code = script.body.replace(/\n+$/, '');
   }
-  return { ok: true, frame, stepNumber: Number(stepNo), phase: f.phase, order: f.order, card, warnings };
+  return { ok: true, frame, stepNumber: Number(stepNo), order: f.order, card, warnings };
 };
 
 // Groups the files returned by GET /api/v2/frames/{project} into frames and steps.
 // `sources` resolves cards that inherit their body from a source script.
-export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { frames: Frame[]; errors: string[] } => {
+// Path of a card without extension, relative to frames/: {frame}/step-{n}/{var-file}
+export const cardBasePath = (frame: string, stepNumber: number, card: Pick<Card, 'varName' | 'title'>): string =>
+  `${slug(frame)}/step-${stepNumber}/${varNameToFileName(cardVarName(card))}`;
+
+export const resultToMd = (result: CardRunResult): string =>
+  renderMd(
+    [
+      ['status', result.status],
+      ['ran-at', result.ranAt],
+      ['elapsed', result.at],
+      ['summary', result.text.replace(/\s+/g, ' ')]
+    ],
+    result.output
+  );
+
+const parseResultMd = (content: string): CardRunResult => {
+  const { fields, code } = parseFrameMd(content);
+  const status = fields.status === 'success' || fields.status === 'error' ? fields.status : 'idle';
+  return { status, text: fields.summary ?? '', output: code, at: fields.elapsed ?? '', ranAt: fields['ran-at'] };
+};
+
+export const rebuildFrames = (
+  files: FrameFile[],
+  sources: SourceDef[] = []
+): { frames: Frame[]; errors: string[]; results: Record<string, CardRunResult> } => {
   type Slot = { order: number; card: Card };
-  const byFrame = new Map<string, Map<number, { pre: Slot[]; post: Slot[] }>>();
+  const byFrame = new Map<string, Map<number, Slot[]>>();
   const errors: string[] = [];
 
   // Private files first: {base} -> body, a real .private.md wins over its .private.example.md
   const privates = new Map<string, { body: string; example: boolean }>();
+  const resultsByBase = new Map<string, CardRunResult>();
   const cardFiles: FrameFile[] = [];
   for (const file of files) {
+    const r = file.path.match(RESULT_PATH_RE);
+    if (r) {
+      resultsByBase.set(r[1], parseResultMd(file.content));
+      continue;
+    }
     const m = file.path.match(PRIVATE_PATH_RE);
     if (!m) {
       cardFiles.push(file);
@@ -354,6 +469,7 @@ export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { 
     }
   }
   const claimed = new Set<string>();
+  const results: Record<string, CardRunResult> = {};
 
   for (const file of cardFiles) {
     const result = parseCardFile(file, sources);
@@ -363,6 +479,8 @@ export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { 
     }
     result.warnings.forEach((w) => errors.push(`${file.path}: ${w}`));
     const base = file.path.replace(/\.md$/, '');
+    const last = resultsByBase.get(base);
+    if (last) results[result.card.id] = last;
     const priv = privates.get(base);
     if (priv) {
       result.card.privateData = priv.body;
@@ -370,9 +488,9 @@ export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { 
     }
     const stepsOfFrame = byFrame.get(result.frame) ?? new Map();
     byFrame.set(result.frame, stepsOfFrame);
-    const step = stepsOfFrame.get(result.stepNumber) ?? { pre: [], post: [] };
+    const step: Slot[] = stepsOfFrame.get(result.stepNumber) ?? [];
     stepsOfFrame.set(result.stepNumber, step);
-    step[result.phase].push({ order: result.order, card: result.card });
+    step.push({ order: result.order, card: result.card });
   }
 
   for (const base of privates.keys()) {
@@ -389,13 +507,11 @@ export const rebuildFrames = (files: FrameFile[], sources: SourceDef[] = []): { 
         .map(([, s], idx) => ({
           id: `step-${idx + 1}`,
           number: idx + 1,
-          splitRatio: 48,
-          preCards: s.pre.sort(byOrder).map((e) => e.card),
-          postCards: s.post.sort(byOrder).map((e) => e.card)
+          cards: s.sort(byOrder).map((e) => e.card)
         }))
     }));
 
-  return { frames, errors };
+  return { frames, errors, results };
 };
 
 // The frame to show: the requested one when it exists, else the first on disk
@@ -503,124 +619,3 @@ export const substituteTemplates = (input: unknown, vars: Record<string, unknown
   }
   return input;
 };
-
-export const defaultSources: SourceDef[] = [
-  {
-    typeSource: 'restapi',
-    name: 'framework-echo-api',
-    baseUrl: 'http://localhost:18080',
-    publicData: `# TestFrame Echo API
-
-## Endpoints
-
-| Method | Route           | Returns                              |
-|--------|---------------|--------------------------------------|
-| POST   | /echo         | 201 with request_id and echoed body  |
-| GET    | /health       | service status                       |
-| POST   | /frames       | writes the project .md frames        |
-| GET    | /frames/{proj}| lists saved frames                   |
-`,
-    privateData: '',
-    scripts: [
-      {
-        name: 'sendEcho',
-        body: `await api.post('/api/v2/echo', {
-  payload
-})
-`
-      },
-      {
-        name: 'checkHealth',
-        body: `await api.get('/api/v2/health')
-`
-      }
-    ]
-  },
-  {
-    typeSource: 'swagger',
-    name: 'product-api',
-    baseUrl: 'http://localhost:18081/api/docs/openapi.json',
-    publicData: `# Product API (Swagger)
-
-Contract source (used by the suite):
-
-\`\`\`yaml
-spec: {{base-url}}   # OpenAPI 3.1.0, endpoints match the spec 100%
-\`\`\`
-
-## Operations used by the suite
-
-- GET /api/products
-- POST /api/products
-- DELETE /api/products/{id}
-`,
-    privateData: `# Access
-
-Local example, no authentication.
-`
-  },
-  {
-    typeSource: 'mongo',
-    name: 'products-db',
-    baseUrl: 'mongodb://localhost:27017/products',
-    publicData: `# products collection
-
-Document shape (used by product-api):
-
-\`\`\`json
-{
-  "_id": "ObjectId",
-  "nome": "string",
-  "categoria": "string",
-  "preco": "number",
-  "ativo": "boolean"
-}
-\`\`\`
-`,
-    privateData: '',
-    scripts: [
-      {
-        name: 'getActiveProducts',
-        body: `db.products.find({ ativo: true })
-`
-      },
-      {
-        name: 'getProductsByCategory',
-        body: `db.products.find({ categoria: "Ferramentas" })
-`
-      }
-    ]
-  },
-  {
-    typeSource: 'assert',
-    name: 'assertions-core',
-    baseUrl: 'http://localhost:18080/api/v2/assertions',
-    publicData: `# Assertion language (JSONata subset)
-
-\`\`\`
-assert <expr> (== | != | > | >= | < | <=) <expr>
-\`\`\`
-
-Paths use JSONata semantics (\`A.B.C\`, projection \`.(Price * Quantity)\`, root \`$\`).
-Functions: \`$sum\` \`$count\` \`$avg\` \`$min\` \`$max\` \`$length\` \`$number\`.
-`,
-    privateData: '',
-    scripts: [
-      {
-        name: 'assertOrderTotal',
-        body: `assert $sum(Account.Order.Product.(Price * Quantity)) == 336.36
-`
-      },
-      {
-        name: 'assertEchoProcessed',
-        body: `assert status == "PROCESSADO"
-`
-      },
-      {
-        name: 'assertOrderHasProducts',
-        body: `assert $count(Account.Order.Product) >= 1
-`
-      }
-    ]
-  }
-];

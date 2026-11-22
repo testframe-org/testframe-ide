@@ -41,6 +41,15 @@ public class FrameController {
         return store.replace(request.project(), "testframe/frames", frames, List.of(), files);
     }
 
+    /** {project, path, content}: path relative to frames/, e.g. main/step-1/get-data.result-data.md */
+    public record SaveResultRequest(String project, String path, String content) {
+    }
+
+    @PostMapping("/results")
+    public Map<String, Object> saveResult(@RequestBody SaveResultRequest request) throws IOException {
+        return store.saveResult(request.project(), request.path(), request.content());
+    }
+
     @GetMapping("/{project}")
     public Map<String, Object> load(@PathVariable String project) throws IOException {
         return store.load(project, "testframe/frames");

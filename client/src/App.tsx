@@ -26,7 +26,11 @@ import {
   rebuildFrames,
   slug,
   substituteTemplates,
-  unwrapSourcesFromLoad
+  unwrapSourcesFromLoad,
+  RESULT_SUFFIX,
+  cardBasePath,
+  resultToMd,
+  validateSourceCode
 } from './frames';
 import { runTargetRequest, testframeApi } from './client-api';
 import { useI18n } from './i18n';
@@ -42,7 +46,6 @@ import type {
   ExecLog,
   HttpResult,
   LogLevel,
-  PhaseKey,
   ResizeDirection,
   SelectedContext,
   SourceDef,
@@ -135,11 +138,12 @@ export default function App({ project, onSwitchProject }: AppProps) {
         const data = await testframeApi.loadFrames(project);
         if (data.files.length) {
           const loaded = rebuildFrames(data.files, loadedSources);
+          setCardRuns(loaded.results);
           const frame = pickFrame(loaded.frames);
           if (frame?.steps.length) {
             setFrameName(frame.name);
             setSteps(frame.steps);
-            setSelectedCardId(frame.steps[0]?.preCards[0]?.id ?? null);
+            setSelectedCardId(frame.steps[0]?.cards[0]?.id ?? null);
           }
           if (loaded.errors.length) {
             pushFrameMsg(t('stepsLoadedWarn', { n: frame?.steps.length ?? 0, m: loaded.errors.length }), 'error');
@@ -186,21 +190,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Locate a card (with its step/phase) by id
+  // Locate a card (with its step) by id
   const findCardContext = useCallback((cardId: string | null): SelectedContext | null => {
-    const phases: PhaseKey[] = ['preCards', 'postCards'];
     for (const step of steps) {
-      for (const phase of phases) {
-        const found = step[phase].find((c) => c.id === cardId);
-        if (found) {
-          return {
-            card: found,
-            stepId: step.id,
-            stepNumber: step.number,
-            phaseKey: phase
-          };
-        }
-      }
+      const found = step.cards.find((c) => c.id === cardId);
+      if (found) return { card: found, stepId: step.id, stepNumber: step.number };
     }
     return null;
   }, [steps]);
@@ -213,8 +207,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     setSteps((prev) =>
       prev.map((step) => ({
         ...step,
-        preCards: step.preCards.map((c) => (c.id === cardId ? { ...c, ...updates } : c)),
-        postCards: step.postCards.map((c) => (c.id === cardId ? { ...c, ...updates } : c))
+        cards: step.cards.map((c) => (c.id === cardId ? { ...c, ...updates } : c))
       }))
     );
   }, []);
@@ -222,42 +215,35 @@ export default function App({ project, onSwitchProject }: AppProps) {
   // var-names are the binding identity of a frame (and its file names): keep them unique.
   // Defaults are English identifiers regardless of the UI language.
   const uniqueVarName = (base: string, taken: Step[] = steps): string => {
-    const used = new Set(taken.flatMap((s) => [...s.preCards, ...s.postCards]).map(cardVarName));
+    const used = new Set(taken.flatMap((s) => s.cards).map(cardVarName));
     let name = base;
     for (let i = 2; used.has(name); i++) name = `${base}${i}`;
     return name;
   };
 
-  // Add a new card to a phase (pre or post)
-  const addCardToPhase = (stepId: string, phaseKey: PhaseKey) => {
-    const isPre = phaseKey === 'preCards';
+  // New request cards use the project's first restapi source (sources come only from the project)
+  const defaultRestSource = () => sources.find((src) => src.typeSource === 'restapi')?.name ?? '';
+
+  // Add a new card at the end of a step
+  const addCard = (stepId: string) => {
     const newId = `card-${Date.now()}`;
-    const type = isPre ? 'request' : 'validation';
     const newCard: Card = {
       id: newId,
-      title: isPre ? t('defaultRequestTitle') : t('defaultAssertionTitle'),
-      varName: uniqueVarName(isPre ? 'newRequest' : 'newAssertion'),
-      type,
-      ...DEFAULT_CARD_SIZE[type],
-      timeout: DEFAULT_TIMEOUT[type],
+      title: t('defaultRequestTitle'),
+      varName: uniqueVarName('newRequest'),
+      type: 'request',
+      ...DEFAULT_CARD_SIZE.request,
+      timeout: DEFAULT_TIMEOUT.request,
       status: 'idle',
-      endpoint: isPre ? 'POST /api/v2/echo' : '',
-      sourceType: isPre ? 'restapi' : 'inline',
-      sourceName: isPre ? 'framework-echo-api' : '',
-      httpMethod: isPre ? 'POST' : '',
-      code: isPre
-        ? `// New execution step\nconst res = await api.post('/api/v2/echo', {\n  ping: true\n});`
-        : `// Validate response\nexpect(res.status).toBe(200);`
+      endpoint: 'POST /api/v2/echo',
+      sourceType: 'restapi',
+      sourceName: defaultRestSource(),
+      httpMethod: 'POST',
+      code: ''
     };
-
-    setSteps((prev) =>
-      prev.map((step) =>
-        step.id === stepId
-          ? ({ ...step, [phaseKey]: [...step[phaseKey], newCard] } as Step)
-          : step
-      )
-    );
+    setSteps((prev) => prev.map((step) => (step.id === stepId ? { ...step, cards: [...step.cards, newCard] } : step)));
     setSelectedCardId(newId);
+    setEditorCardId(newId); // a new card opens straight in the editor
   };
 
   // Remove card
@@ -265,8 +251,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     setSteps((prev) =>
       prev.map((step) => ({
         ...step,
-        preCards: step.preCards.filter((c) => c.id !== cardId),
-        postCards: step.postCards.filter((c) => c.id !== cardId)
+        cards: step.cards.filter((c) => c.id !== cardId)
       }))
     );
     if (selectedCardId === cardId) {
@@ -281,16 +266,15 @@ export default function App({ project, onSwitchProject }: AppProps) {
   const addNewStep = () => {
     const nextNumber = steps.length + 1;
     const newStepId = `step-${Date.now()}`;
-    const preId = `card-${nextNumber}-pre-1`;
-    const postId = `card-${nextNumber}-post-1`;
+    const requestId = `card-${nextNumber}-1`;
+    const resultId = `card-${nextNumber}-2`;
 
     const newStep: Step = {
       id: newStepId,
       number: nextNumber,
-      splitRatio: 48,
-      preCards: [
+      cards: [
         {
-          id: preId,
+          id: requestId,
           title: t('defaultStepTitle', { n: nextNumber }),
           varName: uniqueVarName(`step${nextNumber}Request`),
           type: 'request',
@@ -299,14 +283,12 @@ export default function App({ project, onSwitchProject }: AppProps) {
           status: 'idle',
           endpoint: 'POST /api/v2/echo',
           sourceType: 'restapi',
-          sourceName: 'framework-echo-api',
+          sourceName: defaultRestSource(),
           httpMethod: 'POST',
           code: `// Step ${nextNumber} - service call\nconst result = await api.post('/api/v2/echo', {\n  test: 'step-${nextNumber}'\n});`
-        }
-      ],
-      postCards: [
+        },
         {
-          id: postId,
+          id: resultId,
           title: t('defaultJsonResultTitle'),
           varName: uniqueVarName(`step${nextNumber}Result`),
           type: 'json',
@@ -323,7 +305,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     };
 
     setSteps((prev) => [...prev, newStep]);
-    setSelectedCardId(preId);
+    setSelectedCardId(requestId);
   };
 
   // Remove step
@@ -416,36 +398,13 @@ export default function App({ project, onSwitchProject }: AppProps) {
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  // --- PRE / POST SPLIT DIVIDER RESIZING ---
-  const startSplitResize = (
-    e: React.MouseEvent,
-    stepId: string,
-    currentRatio: number,
-    containerEl: HTMLElement | null
-  ) => {
-    e.stopPropagation();
-    e.preventDefault();
-    if (!containerEl) return;
-
-    const rect = containerEl.getBoundingClientRect();
-    const startX = e.clientX;
-
-    const onMouseMove = (moveEvent: MouseEvent) => {
-      const dx = moveEvent.clientX - startX;
-      const deltaPercent = (dx / rect.width) * 100;
-      const nextRatio = Math.max(25, Math.min(75, Math.round(currentRatio + deltaPercent)));
-      setSteps((prev) =>
-        prev.map((s) => (s.id === stepId ? { ...s, splitRatio: nextRatio } : s))
-      );
-    };
-
-    const onMouseUp = () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
+  // Stores a card's last run next to it (frames/{frame}/step-{n}/{var-file}.result-data.md,
+  // gitignored by the server). Best effort: a failure is only logged.
+  const persistResult = (step: Step, card: Card, result: CardRunResult) => {
+    const path = `${cardBasePath(frameName, step.number, card)}${RESULT_SUFFIX}`;
+    testframeApi
+      .saveResult(slug(projectName), path, resultToMd(result))
+      .catch((err: Error) => pushFrameMsg(t('resultSaveFail', { path, msg: err.message }), 'error'));
   };
 
   // Executes one card. Mutates `vars` (publishes this card's variable) and may update the
@@ -459,26 +418,33 @@ export default function App({ project, onSwitchProject }: AppProps) {
     const varKey = cardVarName;
     const stepLabel = t('logStep', { n: step.number });
     let output = '';
+    // Cards run left to right: inputs come from the nearest JSON card before this one,
+    // results go to the first JSON card after it
+    const position = step.cards.findIndex((c) => c.id === card.id);
+    const jsonBefore = step.cards.slice(0, position).filter((c) => c.type === 'json').reverse();
+    const nextJson = step.cards.slice(position + 1).find((c) => c.type === 'json');
     // Forced failure only through an explicit marker in the code
     const shouldFail =
       card.code.toLowerCase().includes('force_fail') ||
       card.code.toLowerCase().includes('expect(false).tobe(true)');
 
     let http: HttpResult | null = null;
+    // Per-source code rule: invalid code never runs
+    const codeProblem = validateSourceCode(card.sourceType, card.code);
     // Live source-script run (mongo): value published as the card's variable
     let live: { ok: boolean; summary: string; value: unknown; ms: number } | null = null;
     let assertion: { passed?: boolean; actual?: unknown; expected?: unknown; operator?: string } | null = null;
-    if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
+    if (codeProblem) {
+      live = { ok: false, summary: codeProblem, value: null, ms: 0 };
+    } else if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
       // Live assertion against the framework engine (source type: assert)
       let input: unknown = {};
-      for (const source of [...step.postCards, ...step.preCards]) {
-        if (source.type === 'json' && source.id !== card.id) {
-          try {
-            input = substituteTemplates(JSON.parse(source.code), vars);
-            break;
-          } catch {
-            /* try the next json card */
-          }
+      for (const source of jsonBefore) {
+        try {
+          input = substituteTemplates(JSON.parse(source.code), vars);
+          break;
+        } catch {
+          /* try the previous json card */
         }
       }
       const assertRes = await runTargetRequest('POST', '/api/v2/assertions', {
@@ -497,7 +463,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     } else if (card.type === 'request') {
       const parts = endpointParts(card);
       if (parts) {
-        const payloadCard = step.preCards.find((c) => c.type === 'json');
+        const payloadCard = jsonBefore[0];
         let body: unknown;
         if (payloadCard) {
           try {
@@ -543,11 +509,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
       vars[varKey(card)] = assertion;
     } else if (live) {
       nextStatus = live.ok && !shouldFail ? 'success' : 'error';
-      logText = `${stepLabel} ${card.title}: mongo ${live.summary} (${live.ms}ms)`;
+      logText = `${stepLabel} ${card.title}: ${card.sourceType} ${live.summary} (${live.ms}ms)`;
       if (live.ok) {
         vars[varKey(card)] = live.value;
         // Feed the step's JSON result card with the real query result
-        const jsonCard = step.postCards.find((c) => c.type === 'json');
+        const jsonCard = nextJson;
         if (jsonCard) {
           updateCard(jsonCard.id, { code: JSON.stringify(live.value, null, 2), endpoint: `mongo • ${live.summary} • ${live.ms}ms` });
           vars[varKey(jsonCard)] = live.value;
@@ -565,7 +531,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
         }
         vars[varKey(card)] = parsed;
         // Feed the step's JSON result card with the real server response
-        const jsonCard = step.postCards.find((c) => c.type === 'json');
+        const jsonCard = nextJson;
         if (jsonCard) {
           const pretty =
             typeof parsed === 'string' ? http.text : JSON.stringify(parsed, null, 2);
@@ -587,7 +553,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
           /* contains unresolved templates: keep without publishing */
         }
       } else if (!shouldFail && card.type === 'script') {
-        const resultCard = step.postCards.find((c) => c.type === 'json');
+        const resultCard = nextJson;
         if (resultCard) {
           try {
             vars[varKey(card)] = JSON.parse(resultCard.code);
@@ -598,13 +564,16 @@ export default function App({ project, onSwitchProject }: AppProps) {
       }
     }
     if (assertion) output = JSON.stringify(assertion, null, 2);
-    else if (http) output = `HTTP ${http.status} ${http.statusText} (${http.ms}ms)\n\n${http.text}`;
-    else if (live) output = live.ok ? `${live.summary} (${live.ms}ms)\n\n${JSON.stringify(live.value, null, 2)}` : live.summary;
+    // Output is only the payload (JSON when possible); the summary lives in the status line
+    else if (http) output = http.text;
+    else if (live) output = live.ok ? JSON.stringify(live.value, null, 2) : live.summary;
     else {
       const published = vars[varKey(card)];
-      output = `${t('simulatedRun')}${published === undefined ? '' : `\n\n${JSON.stringify(published, null, 2)}`}`;
+      output = published === undefined ? t('simulatedRun') : JSON.stringify(published, null, 2);
     }
-    return { status: nextStatus, text: logText, output, at: elapsedOf() };
+    const result: CardRunResult = { status: nextStatus, text: logText, output, at: elapsedOf(), ranAt: new Date().toISOString() };
+    persistResult(step, card, result);
+    return result;
   };
 
   // --- TEST FLOW EXECUTION (live requests, assertions and mongo queries) ---
@@ -624,8 +593,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     setSteps((prev) =>
       prev.map((s) => ({
         ...s,
-        preCards: s.preCards.map((c) => ({ ...c, status: 'idle' as CardStatus })),
-        postCards: s.postCards.map((c) => ({ ...c, status: 'idle' as CardStatus }))
+        cards: s.cards.map((c) => ({ ...c, status: 'idle' as CardStatus }))
       }))
     );
 
@@ -637,7 +605,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     lastVarsRef.current = vars;
 
     for (const step of steps) {
-      const orderedCards: Card[] = [...step.preCards, ...step.postCards];
+      const orderedCards: Card[] = step.cards;
       for (const card of orderedCards) {
         setSelectedCardId(card.id);
         updateCard(card.id, { status: 'running' });
@@ -680,7 +648,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
     const vars: Record<string, unknown> = { ...lastVarsRef.current };
     const before: Card[] = [];
     for (const s of steps) {
-      const ordered = [...s.preCards, ...s.postCards];
+      const ordered = s.cards;
       const idx = ordered.findIndex((c) => c.id === cardId);
       before.push(...(idx >= 0 ? ordered.slice(0, idx) : ordered));
       if (idx >= 0) break;
@@ -740,6 +708,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
         return;
       }
       const loaded = rebuildFrames(data.files, sources);
+      setCardRuns(loaded.results);
       const frame = pickFrame(loaded.frames, frameName);
       if (!frame?.steps.length) {
         pushFrameMsg(t('framesInvalid', { msg: loaded.errors[0] || 'unrecognized schema' }), 'error');
@@ -747,7 +716,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
       }
       setFrameName(frame.name);
       setSteps(frame.steps);
-      setSelectedCardId(frame.steps[0]?.preCards[0]?.id ?? frame.steps[0]?.postCards[0]?.id ?? null);
+      setSelectedCardId(frame.steps[0]?.cards[0]?.id ?? null);
       pushFrameMsg(
         loaded.errors.length
           ? t('stepsLoadedWarn', { n: frame.steps.length, m: loaded.errors.length })
@@ -1038,6 +1007,8 @@ export default function App({ project, onSwitchProject }: AppProps) {
                 selectedCardId={selectedCardId}
                 editingCodeCardId={editingCodeCardId}
                 copiedId={copiedId}
+                cardRuns={cardRuns}
+                zoom={zoom}
                 onSelectCard={(id) => setSelectedCardId(id)}
                 onStartEditCode={(id) => setEditingCodeCardId(id)}
                 onStopEditCode={() => setEditingCodeCardId(null)}
@@ -1047,9 +1018,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
                 }}
                 onUpdateCard={updateCard}
                 onStartCardResize={startCardResize}
-                onStartSplitResize={startSplitResize}
-                onAddCard={addCardToPhase}
-                onDeleteCard={deleteCard}
+                onAddCard={addCard}
                 onDeleteStep={deleteStep}
                 onCopyCode={handleCopyCode}
               />

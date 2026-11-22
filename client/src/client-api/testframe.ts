@@ -47,6 +47,10 @@ export const testframeApi = {
   saveFrames: (project: string, frame: string, files: FrameFile[]) =>
     requestJson<FramesSaveResponse>('/api/v2/frames', json('POST', { project, frame, files })),
 
+  // Stores a card's last run: path relative to frames/ ending in .result-data.md (gitignored)
+  saveResult: (project: string, path: string, content: string) =>
+    requestJson<FramesSaveResponse>('/api/v2/frames/results', json('POST', { project, path, content })),
+
   loadFrames: (project: string) =>
     requestJson<FramesLoadResponse>(`/api/v2/frames/${encodeURIComponent(project)}`),
 

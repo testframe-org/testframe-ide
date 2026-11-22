@@ -34,6 +34,9 @@ public class ProjectFileStore {
     /** Versioned templates for private files ({@code <name>.private.example.md}): never pruned by a save. */
     public static final String PRIVATE_EXAMPLE_SUFFIX = ".private.example.md";
 
+    /** Last run of a card ({var-file}.result-data.md): kept while its card exists, never versioned. */
+    public static final String RESULT_SUFFIX = ".result-data.md";
+
     public Map<String, Object> save(String project, String subDir, List<FrameFile> files) throws IOException {
         return replace(project, subDir, List.of(), List.of(), files);
     }
@@ -108,7 +111,8 @@ public class ProjectFileStore {
             all = walk.sorted(Comparator.reverseOrder()).toList(); // children before parents
         }
         for (Path p : all) {
-            if (Files.isRegularFile(p) && p.toString().endsWith(".md") && !keep.contains(p) && !isPrivateExample(p)) {
+            if (Files.isRegularFile(p) && p.toString().endsWith(".md") && !keep.contains(p) && !isPrivateExample(p)
+                    && !isResultOfKeptCard(p, keep)) {
                 Files.delete(p);
                 removed++;
             } else if (Files.isDirectory(p) && isEmpty(p)) {
@@ -116,6 +120,32 @@ public class ProjectFileStore {
             }
         }
         return removed;
+    }
+
+    /** A result file survives a replace only while its card file ({var-file}.md) is kept. */
+    private static boolean isResultOfKeptCard(Path p, Set<Path> keep) {
+        String name = p.getFileName().toString();
+        return name.endsWith(RESULT_SUFFIX)
+                && keep.contains(p.resolveSibling(name.substring(0, name.length() - RESULT_SUFFIX.length()) + ".md"));
+    }
+
+    /**
+     * Writes a card's last-run file and makes sure the project's testframe/.gitignore ignores
+     * result files (they are local run output, not test definitions).
+     */
+    public Map<String, Object> saveResult(String project, String relativePath, String content) throws IOException {
+        if (relativePath == null || !relativePath.endsWith(RESULT_SUFFIX)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Result files must end with " + RESULT_SUFFIX);
+        }
+        Map<String, Object> saved = save(project, "testframe/frames", List.of(new FrameFile(relativePath, content)));
+        Path gitignore = resolve(project).resolve("testframe/.gitignore");
+        String pattern = "*" + RESULT_SUFFIX;
+        String current = Files.exists(gitignore) ? Files.readString(gitignore, StandardCharsets.UTF_8) : "";
+        if (current.lines().noneMatch(line -> line.trim().equals(pattern))) {
+            String header = current.isEmpty() ? "# Local run output of the editor (last result of each card)\n" : "\n";
+            Files.writeString(gitignore, current + header + pattern + "\n", StandardCharsets.UTF_8);
+        }
+        return saved;
     }
 
     private static boolean isPrivateExample(Path p) {

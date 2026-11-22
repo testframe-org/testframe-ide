@@ -1,8 +1,8 @@
 # testframe-client
 
 Visual flow editor for TestFrame suites: a Figma-style canvas of steps, each
-split into PRE-EXECUTION (scripts, payloads, requests) and POST-EXECUTION
-(JSON results, assertions) cards.
+one ordered sequence of cards (scripts, payloads, requests, JSON results,
+assertions) executed left to right.
 
 ## Stack
 

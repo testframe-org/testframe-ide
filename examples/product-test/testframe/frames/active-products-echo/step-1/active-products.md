@@ -1,8 +1,6 @@
 -------------------
 title: Active products
-type: json
-phase: post
-order: 1
+order: 2
 timeout: 2000
 --------body----------
 [

@@ -7,15 +7,18 @@ import {
   Loader2,
   XCircle
 } from 'lucide-react';
-import { highlightSyntax } from '../highlight';
+import { highlightSyntax, languageOf } from '../highlight';
+import { RunOutput } from './RunOutput';
 import { useI18n } from '../i18n';
-import type { Card, ResizeDirection } from '../types';
+import type { Card, CardRunResult, ResizeDirection } from '../types';
 
 interface TestBlockCardProps {
   card: Card;
   isSelected: boolean;
   isEditingCode: boolean;
   isCopied: boolean;
+  lastRun?: CardRunResult; // shown under the script once the card has run
+  zoom: number; // canvas zoom, to convert mouse deltas while resizing
   onSelect: () => void;
   onStartEditCode: () => void;
   onStopEditCode: () => void;
@@ -33,6 +36,8 @@ export function TestBlockCard({
   isSelected,
   isEditingCode,
   isCopied,
+  lastRun,
+  zoom,
   onSelect,
   onStartEditCode,
   onStopEditCode,
@@ -42,6 +47,26 @@ export function TestBlockCard({
   onCopy
 }: TestBlockCardProps) {
   const { t } = useI18n();
+
+  // Height of the last-run panel: stored per card, default ~40% of the card
+  const maxResult = Math.max(40, card.height - 110);
+  const resultHeight = Math.min(maxResult, card.resultHeight ?? Math.round(card.height * 0.4));
+  const startResultResize = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const startY = e.clientY;
+    const start = resultHeight;
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.round(start - (ev.clientY - startY) / zoom); // drag up = bigger
+      onUpdateCard({ resultHeight: Math.max(40, Math.min(maxResult, next)) });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   // Border based on selection or execution status
   let ringStyle = 'border-slate-400/80 shadow-md';
@@ -79,9 +104,10 @@ export function TestBlockCard({
               onOpenEditor();
             }}
             title={t('editCardTitle')}
-            className="block w-full text-left text-[13px] font-bold text-slate-900 rounded px-1 -ml-1 truncate hover:bg-white/50 hover:underline decoration-slate-500/60 underline-offset-2 cursor-pointer"
+            className="group/title flex w-full items-center gap-1 text-left text-[13px] font-bold text-slate-900 hover:text-blue-700 transition-colors cursor-pointer"
           >
-            {card.title || card.varName}
+            <span className="truncate">{card.title || card.varName}</span>
+            <Edit3 className="w-3 h-3 shrink-0 opacity-0 group-hover/title:opacity-70 transition-opacity" />
           </button>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className="text-[10px] font-mono text-slate-700 truncate">
@@ -151,26 +177,57 @@ export function TestBlockCard({
         </div>
       </div>
 
-      {/* DARK BODY, CODE / JSON EDITOR STYLE */}
-      <div
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onStartEditCode();
-        }}
-        className="flex-1 overflow-auto p-2.5 relative cursor-text rounded-b-[7px]"
-      >
-        {isEditingCode ? (
-          <textarea
-            autoFocus
-            value={card.code}
-            onChange={(e) => onUpdateCard({ code: e.target.value })}
-            onBlur={onStopEditCode}
-            onClick={(e) => e.stopPropagation()}
-            spellCheck={false}
-            className="w-full h-full bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2 rounded border border-blue-500/60 outline-none resize-none"
-          />
-        ) : (
-          <div className="min-w-max">{highlightSyntax(card.code, card.type)}</div>
+      {/* DARK BODY: script on top, last run below (split is draggable) */}
+      <div className="flex-1 min-h-0 flex flex-col rounded-b-[7px]">
+        <div
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onStartEditCode();
+          }}
+          className="flex-1 min-h-6 overflow-auto scrollbar-dark p-2.5 relative cursor-text"
+        >
+          {isEditingCode ? (
+            <textarea
+              autoFocus
+              value={card.code}
+              onChange={(e) => onUpdateCard({ code: e.target.value })}
+              onBlur={onStopEditCode}
+              onClick={(e) => e.stopPropagation()}
+              spellCheck={false}
+              className="w-full h-full bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2 rounded border border-blue-500/60 outline-none resize-none"
+            />
+          ) : (
+            <div className="min-w-max">{highlightSyntax(card.code, languageOf(card))}</div>
+          )}
+        </div>
+
+        {/* Last run, right under the script; drag its top edge to resize */}
+        {lastRun && !isEditingCode && (
+          <div
+            style={{ height: `${resultHeight}px` }}
+            className="shrink-0 flex flex-col min-h-0 px-2.5 pb-2"
+            title={lastRun.ranAt}
+          >
+            <div
+              onMouseDown={startResultResize}
+              title={t('resizeResult')}
+              className="group/split h-2.5 -mx-2.5 shrink-0 cursor-ns-resize flex items-center"
+            >
+              <div className="w-full border-t border-dashed border-slate-600/70 group-hover/split:border-blue-400 group-hover/split:border-solid" />
+            </div>
+            <div
+              className={`flex items-center gap-1.5 text-[10px] font-semibold shrink-0 ${
+                lastRun.status === 'error' ? 'text-rose-300' : 'text-emerald-300'
+              }`}
+            >
+              {lastRun.status === 'error' ? <XCircle className="w-3 h-3 shrink-0" /> : <CheckCircle2 className="w-3 h-3 shrink-0" />}
+              <span className="truncate">{t('lastRunResult')} · {lastRun.at}</span>
+            </div>
+            <RunOutput
+              output={lastRun.output}
+              className="mt-1 flex-1 min-h-0 overflow-auto text-[10.5px] leading-4 text-slate-300"
+            />
+          </div>
         )}
       </div>
 
