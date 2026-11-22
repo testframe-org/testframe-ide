@@ -53,6 +53,14 @@ interface AppProps {
   onSwitchProject: () => void; // back to the project list
 }
 
+// Canvas viewport limits: buttons/shortcuts step by ZOOM_STEP, the wheel zooms continuously
+const DEFAULT_ZOOM = 0.92;
+const DEFAULT_PAN = { x: 48, y: 36 };
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 2.5;
+const ZOOM_STEP = 1.2;
+const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+
 export default function App({ project, onSwitchProject }: AppProps) {
   const { t, lang, setLang } = useI18n();
 
@@ -73,13 +81,16 @@ export default function App({ project, onSwitchProject }: AppProps) {
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Canvas viewport (Figma-style zoom and pan)
-  const [zoom, setZoom] = useState(0.92);
-  const [pan, setPan] = useState({ x: 48, y: 36 });
+  const [zoom, setZoom] = useState(DEFAULT_ZOOM);
+  const [pan, setPan] = useState(DEFAULT_PAN);
   const [toolMode, setToolMode] = useState<'select' | 'hand'>('select');
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
   const panStartRef = useRef({ x: 0, y: 0 });
   const canvasRef = useRef<HTMLElement | null>(null);
+  // Latest viewport, read by zoomTo so rapid wheel/key events compound before React re-renders
+  const viewportRef = useRef({ zoom, pan });
+  viewportRef.current = { zoom, pan };
 
   // Flow execution state
   const [isRunning, setIsRunning] = useState(false);
@@ -160,13 +171,79 @@ export default function App({ project, onSwitchProject }: AppProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keyboard shortcuts (Space for pan, Ctrl+0 to reset zoom, Ctrl+S to save)
+  // --- ZOOM & PAN CONTROLS ---
+  /**
+   * Sets the zoom keeping one canvas point fixed on screen: the cursor for the
+   * wheel, the visible center for buttons and shortcuts (Figma behavior).
+   */
+  const zoomTo = useCallback((next: number, anchor?: { x: number; y: number }) => {
+    const { zoom: current, pan: currentPan } = viewportRef.current;
+    const target = clampZoom(next);
+    if (target === current) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const point = anchor ?? { x: (rect?.width ?? 0) / 2, y: (rect?.height ?? 0) / 2 };
+    const nextPan = {
+      x: point.x - ((point.x - currentPan.x) / current) * target,
+      y: point.y - ((point.y - currentPan.y) / current) * target
+    };
+    viewportRef.current = { zoom: target, pan: nextPan };
+    setZoom(target);
+    setPan(nextPan);
+  }, []);
+
+  const zoomBy = useCallback((direction: 1 | -1) => {
+    const current = viewportRef.current.zoom;
+    zoomTo(direction > 0 ? current * ZOOM_STEP : current / ZOOM_STEP);
+  }, [zoomTo]);
+
+  const handleZoomIn = () => zoomBy(1);
+  const handleZoomOut = () => zoomBy(-1);
+  const resetViewport = () => {
+    viewportRef.current = { zoom: DEFAULT_ZOOM, pan: DEFAULT_PAN };
+    setZoom(DEFAULT_ZOOM);
+    setPan(DEFAULT_PAN);
+  };
+
+  // Wheel: Ctrl/Cmd + wheel (and trackpad pinch) zooms at the cursor, plain wheel pans.
+  // Registered natively as non-passive: React's wheel listener is passive, so its
+  // preventDefault cannot stop the browser from zooming the whole page.
+  const canvasMounted = view === 'frames';
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const rect = el.getBoundingClientRect();
+        const factor = Math.exp(-Math.max(-50, Math.min(50, e.deltaY)) * 0.01);
+        zoomTo(viewportRef.current.zoom * factor, { x: e.clientX - rect.left, y: e.clientY - rect.top });
+      } else {
+        const { zoom: z, pan: p } = viewportRef.current;
+        const nextPan = { x: p.x - e.deltaX, y: p.y - e.deltaY };
+        viewportRef.current = { zoom: z, pan: nextPan };
+        setPan(nextPan);
+      }
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [canvasMounted, zoomTo]);
+
+  // Keyboard shortcuts (Space for pan, Ctrl/Cmd + '+'/'-' or plain '+'/'-' to zoom,
+  // Ctrl+0 to reset zoom, Ctrl+S to save)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = document.activeElement?.tagName;
       if (e.code === 'Space' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
         e.preventDefault();
         setSpacePressed(true);
+      }
+      const typing = tag === 'INPUT' || tag === 'TEXTAREA' || (document.activeElement as HTMLElement | null)?.isContentEditable;
+      const zoomDirection = e.key === '+' || e.key === '=' ? 1 : e.key === '-' || e.key === '_' ? -1 : 0;
+      const withModifier = e.metaKey || e.ctrlKey;
+      // only while the canvas is on screen; plain +/- never steal keys from an editor
+      if (zoomDirection !== 0 && canvasRef.current && (withModifier || (!typing && !e.altKey))) {
+        e.preventDefault(); // Ctrl/Cmd +/- would otherwise zoom the whole page
+        zoomBy(zoomDirection);
       }
       if ((e.metaKey || e.ctrlKey) && e.key === '0') {
         e.preventDefault();
@@ -318,27 +395,6 @@ export default function App({ project, onSwitchProject }: AppProps) {
         .filter((s) => s.id !== stepId)
         .map((s, idx) => ({ ...s, number: idx + 1 }))
     );
-  };
-
-  // --- ZOOM & PAN CONTROLS ---
-  const handleZoomIn = () => setZoom((z) => Math.min(1.6, +(z + 0.1).toFixed(2)));
-  const handleZoomOut = () => setZoom((z) => Math.max(0.45, +(z - 0.1).toFixed(2)));
-  const resetViewport = () => {
-    setZoom(0.92);
-    setPan({ x: 48, y: 36 });
-  };
-
-  const handleWheel = (e: React.WheelEvent<HTMLElement>) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.06 : 0.06;
-      setZoom((z) => Math.min(1.6, Math.max(0.45, +(z + delta).toFixed(2))));
-    } else {
-      setPan((p) => ({
-        x: p.x - e.deltaX,
-        y: p.y - e.deltaY
-      }));
-    }
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLElement>) => {
@@ -834,7 +890,6 @@ export default function App({ project, onSwitchProject }: AppProps) {
         {/* INFINITE CANVAS (WITH PAN AND ZOOM) */}
         <main
           ref={canvasRef}
-          onWheel={handleWheel}
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
