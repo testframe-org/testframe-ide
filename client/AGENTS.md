@@ -15,6 +15,11 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   `CardEditModal` (opened by a card's Edit button: general fields on the left, `SourceForm` on the right),
   `SourceForm` (one form per type-source: http, swagger, query, assert, json, expression, code),
   `ExecutionConsole`, `SourcesView` (the Sources tab: source CRUD incl. the scripts editor)
+  , `CodeEditor` (the code textarea of `SourceForm` with a completion popup)
+- `src/autocomplete.ts` — completion logic (pure): `{{varName.path}}` bindings in every body;
+  in assert/expression bodies also jsonassert built-ins (`$sum(`), keywords, var-names and the
+  fields of their last-run values. Ctrl+Space opens it, ↑/↓ + Enter/Tab accept, Esc closes.
+  The built-in list mirrors the engines (`modules/jsonassert`): keep it in sync
 - `src/frames.ts` — editor model only. It does **not** own the project format: the server
   (`server/.../format/`, spec `../docs/project-format.md`) parses/renders the `.md` files,
   applies script inheritance and validates on save; the API exchanges JSON. Execution is a

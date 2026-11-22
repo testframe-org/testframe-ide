@@ -53,6 +53,16 @@ interface AppProps {
   onSwitchProject: () => void; // back to the project list
 }
 
+/** A stored run output as a value (JSON when it parses), for completion samples. */
+const parseOutput = (output: string | undefined): unknown => {
+  if (!output) return undefined;
+  try {
+    return JSON.parse(output);
+  } catch {
+    return undefined;
+  }
+};
+
 // Canvas viewport limits: buttons/shortcuts step by ZOOM_STEP, the wheel zooms continuously
 const DEFAULT_ZOOM = 0.92;
 const DEFAULT_PAN = { x: 48, y: 36 };
@@ -279,6 +289,21 @@ export default function App({ project, onSwitchProject }: AppProps) {
   }, [steps]);
 
   const editorContext = findCardContext(editorCardId);
+
+  // Variables the edited card can reference: every card before it in run order, valued by the
+  // last run (or the card's stored result) so completion can offer their fields
+  const completionVars = (() => {
+    const vars: Record<string, unknown> = {};
+    if (!editorCardId) return vars;
+    for (const step of steps) {
+      for (const card of step.cards) {
+        if (card.id === editorCardId) return vars;
+        const name = cardVarName(card);
+        vars[name] = name in lastVarsRef.current ? lastVarsRef.current[name] : parseOutput(cardRuns[card.id]?.output);
+      }
+    }
+    return vars;
+  })();
   const closeEditor = useCallback(() => setEditorCardId(null), []);
 
   // Update a specific card property
@@ -963,6 +988,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
         lastRun={editorCardId ? cardRuns[editorCardId] : undefined}
         onUpdateCard={updateCard}
         onDeleteCard={deleteCard}
+        completionVars={completionVars}
         onOpenSources={() => {
           setEditorCardId(null);
           setView('sources');

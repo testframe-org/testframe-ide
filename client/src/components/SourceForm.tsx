@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { HTTP_METHODS, checkSourceCode } from '../catalog';
 import { useI18n } from '../i18n';
 import type { Card, SourceDef } from '../client-api/testframe.z';
+import type { CompletionContext } from '../autocomplete';
+import { CodeEditor } from './CodeEditor';
 
 // ============================================================================
 // SOURCE-SPECIFIC FORMS: each type-source has its own way of filling a card
@@ -12,6 +14,8 @@ interface SourceFormProps {
   card: Card;
   source?: SourceDef; // the card's source definition, when it exists
   onChange: (updates: Partial<Card>) => void;
+  /** Variables visible to this card (earlier cards), for code completion. */
+  completionVars?: Record<string, unknown>;
 }
 
 type FormKind = 'http' | 'swagger' | 'query' | 'assert' | 'json' | 'expression' | 'code';
@@ -42,19 +46,20 @@ function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-xs font-medium text-slate-600 mb-1">{children}</label>;
 }
 
-function Editor({ value, onChange, rows = 12, placeholder }: {
+function Editor({ value, onChange, rows = 12, placeholder, completion }: {
   value: string;
   onChange: (v: string) => void;
   rows?: number;
   placeholder?: string;
+  completion?: CompletionContext;
 }) {
   return (
-    <textarea
+    <CodeEditor
       value={value}
-      onChange={(e) => onChange(e.target.value)}
-      spellCheck={false}
+      onChange={onChange}
       rows={rows}
       placeholder={placeholder}
+      completion={completion}
       className={editorCls}
     />
   );
@@ -144,9 +149,14 @@ function jsonStatus(text: string): { ok: boolean; message: string } {
 }
 
 
-export function SourceForm({ card, source, onChange }: SourceFormProps) {
+export function SourceForm({ card, source, onChange, completionVars = {} }: SourceFormProps) {
   const { t } = useI18n();
   const kind = formKindOf(card.sourceType || 'inline');
+  // assert lines and filter/mapper expressions speak jsonassert; every other body only binds {{vars}}
+  const completion: CompletionContext = {
+    mode: kind === 'assert' || kind === 'expression' ? 'jsonassert' : 'bindings',
+    vars: completionVars
+  };
   const setCode = (code: string) => onChange({ code });
   // Per-type rule (mongo: one shell call, oracle: one SELECT, assert: jsonassert lines),
   // answered by the server (POST /api/v2/validate, cached): the save answers 400 anyway
@@ -172,7 +182,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
           <ScriptPicker card={card} source={source} onChange={onChange} />
           <div>
             <Label>{t('requestBodyLabel')}</Label>
-            <Editor value={card.code} onChange={setCode} placeholder='{ "key": "{{previousVar}}" }' />
+            <Editor completion={completion} value={card.code} onChange={setCode} placeholder='{ "key": "{{previousVar}}" }' />
             {card.code.trim() && card.code.trim().startsWith('{') && (
               <Status ok={body.ok} text={body.ok ? t('jsonValid') : t('jsonInvalid', { msg: body.message })} />
             )}
@@ -195,7 +205,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
           <MethodPath card={card} onChange={onChange} />
           <div>
             <Label>{t('requestBodyLabel')}</Label>
-            <Editor value={card.code} onChange={setCode} placeholder='{ "nome": "{{productName}}" }' />
+            <Editor completion={completion} value={card.code} onChange={setCode} placeholder='{ "nome": "{{productName}}" }' />
           </div>
         </div>
       );
@@ -225,7 +235,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
           <ScriptPicker card={card} source={source} onChange={onChange} />
           <div>
             <Label>{t('assertLinesLabel')}</Label>
-            <Editor value={card.code} onChange={setCode} rows={10} placeholder="assert $count(items) > 0" />
+            <Editor completion={completion} value={card.code} onChange={setCode} rows={10} placeholder="assert $count(items) > 0" />
             <p className="mt-1 text-[11px] text-slate-500 font-mono">{t('assertHint')}</p>
             {lines.length > 0 && (
               <Status ok={!problem} text={problem ?? t('assertLinesOk', { n: lines.length })} />
@@ -239,7 +249,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
       return (
         <div>
           <Label>{t('jsonBodyLabel')}</Label>
-          <Editor value={card.code} onChange={setCode} rows={16} placeholder='{ "period": "2026-11" }' />
+          <Editor completion={completion} value={card.code} onChange={setCode} rows={16} placeholder='{ "period": "2026-11" }' />
           {card.code.trim() && (
             <Status ok={status.ok} text={status.ok ? t('jsonValid') : t('jsonInvalid', { msg: status.message })} />
           )}
@@ -252,7 +262,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
           <ScriptPicker card={card} source={source} onChange={onChange} />
           <div>
             <Label>{t('expressionLabel')}</Label>
-            <Editor value={card.code} onChange={setCode} rows={10} placeholder="items[price > 100].name" />
+            <Editor completion={completion} value={card.code} onChange={setCode} rows={10} placeholder="items[price > 100].name" />
           </div>
         </div>
       );
@@ -262,7 +272,7 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
           <ScriptPicker card={card} source={source} onChange={onChange} />
           <div>
             <Label>{t('codeLabel')}</Label>
-            <Editor value={card.code} onChange={setCode} rows={14} />
+            <Editor completion={completion} value={card.code} onChange={setCode} rows={14} />
           </div>
         </div>
       );

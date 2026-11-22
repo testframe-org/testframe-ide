@@ -26,6 +26,8 @@ interface CardEditModalProps {
   onUpdateCard: (cardId: string, updates: Partial<Card>) => void;
   onDeleteCard: (cardId: string) => void;
   onOpenSources: () => void;
+  /** Variables visible to the edited card (earlier cards), for code completion. */
+  completionVars?: Record<string, unknown>;
 }
 
 const PRESETS = [
@@ -51,7 +53,8 @@ export function CardEditModal({
   lastRun,
   onUpdateCard,
   onDeleteCard,
-  onOpenSources
+  onOpenSources,
+  completionVars
 }: CardEditModalProps) {
   const { t } = useI18n();
 
@@ -296,7 +299,7 @@ export function CardEditModal({
                 {card.sourceName && <span className="text-[11px] font-mono text-slate-500 truncate">{sourceType}/{card.sourceName}</span>}
               </div>
               {card.sourceType ? (
-                <SourceForm card={card} source={source} onChange={update} />
+                <SourceForm card={card} source={source} onChange={update} completionVars={completionVars} />
               ) : (
                 <p className="text-xs text-slate-500 border border-dashed border-slate-300 rounded-lg p-4">{t('sourceTypeFirstHint')}</p>
               )}
