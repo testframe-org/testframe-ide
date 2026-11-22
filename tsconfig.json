@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
@@ -14,13 +18,38 @@
     "resolveJsonModule": true,
     "allowJs": false,
     "incremental": true,
-    "types": ["bun", "node"],
-    "plugins": [{ "name": "next" }],
+    "types": [
+      "bun",
+      "node"
+    ],
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
     "paths": {
-      "@/*": ["./*"],
-      "@jsonassert/jsonassert-js": ["../jsonassert/modules/jsonassert-js/src/index.ts"]
+      "@/*": [
+        "./*"
+      ],
+      "@jsonassert/jsonassert-js": [
+        "../jsonassert/modules/jsonassert-js/src/index.ts"
+      ]
     }
   },
-  "include": ["next-env.d.ts", "app", "lib", "editor", "tests", "scripts", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "server", "client", "examples"]
+  "include": [
+    "next-env.d.ts",
+    "app",
+    "lib",
+    "editor",
+    "tests",
+    "scripts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "server",
+    "client",
+    "examples"
+  ]
 }
