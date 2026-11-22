@@ -29,12 +29,21 @@ final class ExampleProject {
         try (Stream<Path> walk = Files.walk(dir)) {
             return walk.filter(Files::isRegularFile)
                     .filter(p -> p.toString().endsWith(".md"))
+                    .filter(p -> !isLocalOnly(p.getFileName().toString()))
                     .sorted(Comparator.comparing(Path::toString))
                     .map(p -> new ProjectFile(dir.relativize(p).toString().replace('\\', '/'), read(p)))
                     .toList();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /**
+     * Gitignored files a running editor leaves next to the committed ones (last
+     * run results, filled-in private data): never part of the reference project.
+     */
+    private static boolean isLocalOnly(String fileName) {
+        return fileName.endsWith(CardCodec.RESULT_SUFFIX) || fileName.endsWith(".private.md");
     }
 
     private static String read(Path p) {
