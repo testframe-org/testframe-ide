@@ -1,6 +1,5 @@
 -------------------
 title: Echo result
-order: 3
 timeout: 2000
 -------------------
 ```json

@@ -26,14 +26,14 @@ class CardCodecTest {
     private static final ScriptLookup EXAMPLE_SCRIPTS = ScriptLookup.of(SourceCodec.read(ExampleProject.sources()));
 
     private static Card card(String varName, String sourceType, String sourceName, String script, String code) {
-        return new Card(varName, "Title of " + varName, null, null, sourceType, sourceName, script, "", null,
+        return new Card(varName, "Title of " + varName, null, sourceType, sourceName, script, "", null,
                 null, null, null, null, code, null, null);
     }
 
     @Test
     void everyCommittedCardFileRoundTrips() {
         List<ProjectFile> cards = ExampleProject.frames().stream()
-                .filter(f -> !f.path().contains(".private."))
+                .filter(f -> !f.path().contains(".private.") && !f.path().endsWith("/flow.md"))
                 .toList();
         assertFalse(cards.isEmpty());
         for (ProjectFile file : cards) {
@@ -44,7 +44,7 @@ class CardCodecTest {
             Card card = parsed.card();
             Optional<String> script = card.script() == null ? Optional.empty()
                     : EXAMPLE_SCRIPTS.body(card.sourceType(), card.sourceName(), card.script());
-            assertEquals(file.content(), CardCodec.render(card, parsed.order(), script), file.path());
+            assertEquals(file.content(), CardCodec.render(card, script), file.path());
         }
     }
 
@@ -78,9 +78,9 @@ class CardCodecTest {
     @Test
     void cardBoundToAnUnchangedScriptStoresAnEmptyBody() {
         Optional<String> script = Optional.of("db.x.find()\n");
-        String inherited = CardCodec.render(card("runQuery", "mongo", "db", "runQuery", "db.x.find()"), 1, script);
+        String inherited = CardCodec.render(card("runQuery", "mongo", "db", "runQuery", "db.x.find()"), script);
         assertTrue(inherited.endsWith("-------------------\n"));
-        String overridden = CardCodec.render(card("runQuery", "mongo", "db", "runQuery", "db.y.find()"), 1, script);
+        String overridden = CardCodec.render(card("runQuery", "mongo", "db", "runQuery", "db.y.find()"), script);
         assertTrue(overridden.endsWith("-------------------\n```js\ndb.y.find()\n```\n"));
 
         CardCodec.Parsed loaded = CardCodec.parse("run-query", inherited, (type, name, s) -> script);
@@ -89,7 +89,7 @@ class CardCodecTest {
 
     @Test
     void missingScriptLoadsWithAWarning() {
-        String md = CardCodec.render(card("runQuery", "mongo", "db", "runQuery", ""), 1, Optional.empty());
+        String md = CardCodec.render(card("runQuery", "mongo", "db", "runQuery", ""), Optional.empty());
         CardCodec.Parsed loaded = CardCodec.parse("run-query", md, ScriptLookup.NONE);
         assertEquals(List.of("script \"runQuery\" not found in source mongo/db"), loaded.warnings());
         assertEquals("", loaded.card().code());
@@ -97,31 +97,29 @@ class CardCodecTest {
 
     @Test
     void defaultsComeFromTheTypeAndSizeIsWrittenOnlyWhenDifferent() {
-        String json = CardCodec.render(card("payload", "inline", "", null, "{}"), 2, Optional.empty());
+        String json = CardCodec.render(card("payload", "inline", "", null, "{}"), Optional.empty());
         assertEquals("""
                 -------------------
                 title: Title of payload
-                order: 2
                 timeout: 2000
                 -------------------
                 ```json
                 {}
                 ```
                 """, json);
-        Card big = new Card("sendIt", " ", null, null, "restapi", "api", null, " POST /x ", null,
+        Card big = new Card("sendIt", " ", null, "restapi", "api", null, " POST /x ", null,
                 8000, 360, 300, 120, "", null, null);
         assertEquals("""
                 -------------------
                 title: sendIt
-                order: 1
                 source: restapi/api
                 endpoint: POST /x
                 timeout: 8000
                 size: 360x300
                 result-height: 120
                 -------------------
-                """, CardCodec.render(big, 1, Optional.empty()));
-        Card parsed = CardCodec.parse("send-it", CardCodec.render(big, 1, Optional.empty()), ScriptLookup.NONE).card();
+                """, CardCodec.render(big, Optional.empty()));
+        Card parsed = CardCodec.parse("send-it", CardCodec.render(big, Optional.empty()), ScriptLookup.NONE).card();
         assertEquals("request", parsed.type());
         assertEquals("POST", parsed.httpMethod());
         assertEquals(120, parsed.resultHeight());
@@ -142,16 +140,14 @@ class CardCodecTest {
 
     @Test
     void frontmatterSchema() {
-        assertEquals(List.of("title: required", "order: required"), CardCodec.validate(Map.of()));
-        assertEquals(List.of("order: must be >= 1"), CardCodec.validate(Map.of("title", "A", "order", "0")));
+        assertEquals(List.of("title: required"), CardCodec.validate(Map.of()));
         assertEquals(List.of("source: unknown type-source"),
-                CardCodec.validate(Map.of("title", "A", "order", "1", "source", "ftp/x")));
+                CardCodec.validate(Map.of("title", "A", "source", "ftp/x")));
         assertEquals(List.of("script: script requires source: {type-source}/{name-source}"),
-                CardCodec.validate(Map.of("title", "A", "order", "1", "source", "mongo", "script", "getAll")));
+                CardCodec.validate(Map.of("title", "A", "source", "mongo", "script", "getAll")));
         assertEquals(List.of("timeout: must be <= 120000", "size: size must be {width}x{height}", "result-height: must be >= 24"),
-                CardCodec.validate(Map.of("title", "A", "order", "1", "timeout", "999999", "size", "big", "result-height", "3")));
-        assertEquals(List.of("order: expected an integer"), CardCodec.validate(Map.of("title", "A", "order", "1.5")));
-        assertEquals(List.of(), CardCodec.validate(Map.of("title", "A", "order", "1e1")));
+                CardCodec.validate(Map.of("title", "A", "timeout", "999999", "size", "big", "result-height", "3")));
+        assertEquals(List.of(), CardCodec.validate(Map.of("title", "A", "timeout", "5e3")));
     }
 
     @Test
@@ -189,7 +185,7 @@ class CardCodecTest {
         e = assertThrows(FormatException.class, () -> FrameCodec.write(lossy, ScriptLookup.NONE));
         assertEquals("var-name \"getHTTPData\" cannot be stored; use \"getHttpdata\"", e.getMessage());
 
-        Card badTimeout = new Card("slow", "Slow", null, null, "inline", "", null, "", null, 50, null, null, null, "", null, null);
+        Card badTimeout = new Card("slow", "Slow", null, "inline", "", null, "", null, 50, null, null, null, "", null, null);
         e = assertThrows(FormatException.class,
                 () -> FrameCodec.write(new Frame("Main", List.of(new Step(1, List.of(badTimeout)))), ScriptLookup.NONE));
         assertEquals("step 1 \"Slow\": timeout: must be >= 100", e.getMessage());
@@ -197,42 +193,69 @@ class CardCodecTest {
 
     @Test
     void frameWriteNumbersStepsAndCardsByPositionAndDerivesMissingVarNames() {
-        Card untitledVar = new Card(null, "Echo payload", null, 9, null, null, null, null, null, null, null, null, null,
+        Card untitledVar = new Card(null, "Echo payload", null, null, null, null, null, null, null, null, null, null,
                 "{}", "secret", null);
         FrameCodec.Written written = FrameCodec.write(new Frame("My Flow", List.of(
                 new Step(7, List.of(card("first", "inline", "", null, "1"), untitledVar)))), ScriptLookup.NONE);
         assertEquals("my-flow", written.dir());
         Map<String, String> files = written.files().stream()
                 .collect(Collectors.toMap(ProjectFile::path, ProjectFile::content));
-        assertEquals(List.of("my-flow/step-1/echo-payload.md", "my-flow/step-1/echo-payload.private.md", "my-flow/step-1/first.md"),
+        assertEquals(List.of("my-flow/step-1/echo-payload.md", "my-flow/step-1/echo-payload.private.md",
+                        "my-flow/step-1/first.md", "my-flow/step-1/flow.md"),
                 files.keySet().stream().sorted().toList());
-        assertTrue(files.get("my-flow/step-1/echo-payload.md").contains("order: 2\n"));
+        assertEquals("-------------------\n-------------------\nfirst\necho-payload\n", files.get("my-flow/step-1/flow.md"),
+                "the step sequence maps the card files in order");
         assertEquals("-------------------\n-------------------\nsecret\n", files.get("my-flow/step-1/echo-payload.private.md"));
+    }
+
+    @Test
+    void varNameFlowIsReservedForTheSequenceFile() {
+        FormatException e = assertThrows(FormatException.class, () -> FrameCodec.write(new Frame("Main",
+                List.of(new Step(1, List.of(card("flow", "inline", "", null, "{}"))))), ScriptLookup.NONE));
+        assertEquals("var-name \"flow\" is reserved by the step sequence file; use another name", e.getMessage());
     }
 
     @Test
     void frameReadReportsInvalidFilesAndOrphanPrivates() {
         List<ProjectFile> files = List.of(
-                new ProjectFile("main/step-1/a.md", "-------------------\ntitle: A\n-------------------\n"),
+                new ProjectFile("main/step-1/a.md", "-------------------\n-------------------\n"),
                 new ProjectFile("main/step-1/b.private.md", "-------------------\n-------------------\nx\n"),
                 new ProjectFile("main/notes.md", "x"));
         FramesResponse read = FrameCodec.read(files, ScriptLookup.NONE);
         assertEquals(List.of(
-                "main/step-1/a.md: order: required",
+                "main/step-1/a.md: title: required",
                 "main/notes.md: path must be {frame}/step-{n}/{var-name}.md",
                 "main/step-1/b: private data without a card (main/step-1/b.md missing)"), read.errors());
         assertEquals(List.of(), read.frames());
     }
 
     @Test
-    void frameReadSortsStepsNumericallyAndCardsByOrder() {
-        Function<Integer, String> md = order -> "-------------------\ntitle: T\norder: " + order + "\n-------------------\n";
+    void flowMismatchIsReported() {
         List<ProjectFile> files = List.of(
-                new ProjectFile("main/step-10/z.md", md.apply(1)),
-                new ProjectFile("main/step-2/b.md", md.apply(2)),
-                new ProjectFile("main/step-2/c.md", md.apply(1)),
+                new ProjectFile("main/step-1/a.md", "-------------------\ntitle: A\n-------------------\n"),
+                new ProjectFile("main/step-1/b.md", "-------------------\ntitle: B\n-------------------\n"),
+                new ProjectFile("main/step-1/flow.md", "-------------------\n-------------------\nb\nghost\n"));
+        FramesResponse read = FrameCodec.read(files, ScriptLookup.NONE);
+        assertEquals(List.of(
+                "main/step-1/flow.md: ghost.md is listed but the card file is missing",
+                "main/step-1/a.md: not listed in flow.md"), read.errors());
+        assertEquals(List.of("b", "a"), read.frames().getFirst().steps().getFirst().cards().stream()
+                .map(Card::varName).toList(), "listed cards first, unlisted appended");
+    }
+
+    @Test
+    void frameReadSortsStepsNumericallyAndCardsByFlow() {
+        Function<String, String> md = title -> "-------------------\ntitle: " + title + "\n-------------------\n";
+        List<ProjectFile> files = List.of(
+                new ProjectFile("main/step-10/z.md", md.apply("Z")),
+                new ProjectFile("main/step-10/flow.md", "-------------------\n-------------------\nz\n"),
+                new ProjectFile("main/step-2/b.md", md.apply("B")),
+                new ProjectFile("main/step-2/c.md", md.apply("C")),
+                new ProjectFile("main/step-2/flow.md", "-------------------\n-------------------\nc\nb\n"),
                 new ProjectFile("main/step-2/c.result-data.md", CardCodec.renderResult(new CardRun("error", "boom", "", "1s", null))));
-        Frame frame = FrameCodec.read(files, ScriptLookup.NONE).frames().getFirst();
+        FramesResponse read = FrameCodec.read(files, ScriptLookup.NONE);
+        assertEquals(List.of(), read.errors());
+        Frame frame = read.frames().getFirst();
         assertEquals(List.of(1, 2), frame.steps().stream().map(Step::number).toList());
         assertEquals(List.of("c", "b"), frame.steps().getFirst().cards().stream().map(Card::varName).toList());
         assertEquals("error", frame.steps().getFirst().cards().getFirst().lastRun().status());

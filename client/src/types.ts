@@ -91,13 +91,13 @@ export interface Frame {
 }
 
 // --- Wire shapes of GET/POST /api/v2/frames (the server owns the .md format) ---
-// type and httpMethod are derived by the server (ignored on save), as are order and step
-// numbers (positions); lastRun is the card's {var-file}.result-data.md.
+// type and httpMethod are derived by the server (ignored on save), as are step numbers
+// (positions); the card sequence in a step comes from its flow.md. lastRun is the card's
+// {var-file}.result-data.md.
 export interface CardData {
   varName: string;
   title: string;
   type: string;
-  order: number;
   sourceType: string;
   sourceName: string;
   script: string | null;

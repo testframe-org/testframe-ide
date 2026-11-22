@@ -240,11 +240,10 @@ export const frameToApi = (name: string, steps: Step[]): FrameData => ({
   name,
   steps: steps.map((step, idx) => ({
     number: idx + 1,
-    cards: step.cards.map((card, order) => ({
+    cards: step.cards.map((card) => ({
       varName: cardVarName(card),
       title: card.title,
       type: card.type,
-      order: order + 1,
       sourceType: card.sourceType,
       sourceName: card.sourceName,
       script: card.script ?? null,

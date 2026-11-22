@@ -34,6 +34,7 @@ The project is in beta: this format changes without migrations or legacy loaders
   frames/
     {frame}/                       one flow (canvas), kebab-case, e.g. active-products-echo
       step-{n}/                    step number n (1-based, ordered numerically)
+        flow.md                    the step's card sequence: one card file name per line, in order
         {var-file}.md              one card; var-name = camelCase(var-file)
         {var-file}.private.md      optional private data of that card (gitignored)
   sources/
@@ -58,7 +59,6 @@ source names match `[a-z0-9][a-z0-9._-]*` (at least 2 characters).
 | Key | Required | Meaning |
 |---|---|---|
 | `title` | yes | display name on the canvas (free text) |
-| `order` | yes | 1-based position inside the step (cards run left to right) |
 | `source` | no | `{type-source}/{name-source}` (or just `{type-source}`); omitted = inline |
 | `script` | no | camelCase script of `source`; empty body = inherit it |
 | `endpoint` | no | `METHOD /path` for requests (HTTP method is parsed from it) |
@@ -75,6 +75,15 @@ The fence language also follows the source type: mongo/restapi/graphql/kafka/grp
 SQL types → `sql`, assert/filter/mapper → `jsonassert`, swagger/inline (and JSON outputs) →
 `json` (`text` when the output is not JSON). A card that inherits a source script stores no
 body at all.
+
+## Step sequence: `flow.md`
+
+Each step folder has a `flow.md` (empty frontmatter) whose body lists the step's card file
+names, one per line, in execution order (the `.md` extension may be written or not; the
+server always writes it without). Saving a frame rewrites it; the var-name `flow` is
+reserved because it would collide with this file. On load, cards missing from the list are
+appended (by file name) and entries without a card file are reported in `errors` — the
+sequence is never silently lost.
 
 ## Sources: `sources/{type-source}/{name-source}.md`
 
@@ -118,9 +127,10 @@ Phase 2 (see `TODO.md`):
 
 ## Execution order
 
-A step is one ordered sequence of cards (no pre/post phases). Cards run by `order`. A request
-body comes from the nearest `json` card **before** the card; a request or mongo result is
-written into the first `json` card **after** it and published as the card's variable.
+A step is one ordered sequence of cards (no pre/post phases). Cards run in the order their
+files are listed in the step's `flow.md`. A request body comes from the nearest `json` card
+**before** the card; a request or mongo result is written into the first `json` card **after**
+it and published as the card's variable.
 
 An `assert` card evaluates against **every variable published so far in the frame**, as an
 object keyed by var-name: `assert $count(activeProducts) > 0` reads the `activeProducts`
@@ -144,10 +154,11 @@ The API exchanges structured JSON; the server builds every path and file. Full s
 `server/AGENTS.md`.
 
 - `GET /api/v2/frames/{project}` → `{frames, errors}`: frames sorted by name, steps renumbered
-  from 1 in numeric order, cards by `order` (then var-name), each with its private data and last
-  run. Invalid files are skipped and reported in `errors`.
+  from 1 in numeric order, cards in the order of the step's `flow.md`, each with its private
+  data and last run. Invalid files are skipped and reported in `errors`.
 - `POST /api/v2/frames` `{project, frame: {name, steps}}`: replaces `frames/{slug(name)}/`;
-  other frames are untouched. Steps and cards are numbered by position.
+  other frames are untouched. Steps are numbered by position, card order is stored in each
+  step's `flow.md`.
 - `POST /api/v2/frames/results` `{project, frame, step, varName, result}`: writes the card's
   `{var-file}.result-data.md`.
 - `GET /api/v2/sources/{project}` → `{sources}`; `POST /api/v2/sources` `{project, sources}`:
@@ -168,10 +179,16 @@ sources/
   mongo/products-db.md  mongo/products-db/{get-active-products, get-products-by-category}.md
   swagger/product-api.md  swagger/product-api.private.example.md
 
+# frames/active-products-echo/step-1/flow.md
+-------------------
+-------------------
+get-active-products
+active-products
+assert-active-products
+
 # frames/active-products-echo/step-1/get-active-products.md
 -------------------
 title: Get active products
-order: 1
 source: mongo/products-db
 script: getActiveProducts
 timeout: 5000
@@ -180,7 +197,6 @@ timeout: 5000
 # frames/active-products-echo/step-1/assert-active-products.md
 -------------------
 title: Assert active products
-order: 3
 source: assert/assertions-core
 timeout: 1000
 -------------------

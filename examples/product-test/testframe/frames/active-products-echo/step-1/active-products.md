@@ -1,6 +1,5 @@
 -------------------
 title: Active products
-order: 2
 timeout: 2000
 -------------------
 ```json

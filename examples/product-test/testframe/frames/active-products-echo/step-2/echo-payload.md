@@ -1,6 +1,5 @@
 -------------------
 title: Echo payload
-order: 1
 timeout: 2000
 -------------------
 ```json

@@ -32,7 +32,7 @@ public final class CardCodec {
     private static final Pattern WHITESPACE = Pattern.compile("(?U)\\s+");
 
     /** A parsed card: {@code errors} non-empty means the file is invalid and {@code card} is null. */
-    public record Parsed(Card card, int order, List<String> errors, List<String> warnings) {
+    public record Parsed(Card card, List<String> errors, List<String> warnings) {
     }
 
     private CardCodec() {
@@ -41,10 +41,11 @@ public final class CardCodec {
     // ------------------------------------------------------------------ cards
 
     /**
-     * Renders a card at position {@code order}. {@code scriptBody} is the body of the card's
-     * source script (when it exists): a card whose code still matches it stores an empty body.
+     * Renders a card. {@code scriptBody} is the body of the card's source script (when it
+     * exists): a card whose code still matches it stores an empty body. The card's position in
+     * the step is not stored here: it comes from the step's {@code flow.md}.
      */
-    public static String render(Card card, int order, Optional<String> scriptBody) {
+    public static String render(Card card, Optional<String> scriptBody) {
         String type = Catalog.cardTypeOf(sourceTypeOf(card));
         Catalog.Size size = Catalog.defaultSize(type);
         int width = card.width() == null ? size.width() : card.width();
@@ -56,7 +57,6 @@ public final class CardCodec {
         Map<String, Object> fields = new LinkedHashMap<>();
         String title = Names.trim(card.title());
         fields.put("title", title.isEmpty() ? card.varName() : title);
-        fields.put("order", order);
         fields.put("source", sourceRef(card));
         fields.put("script", card.script());
         fields.put("endpoint", Names.trim(card.endpoint()));
@@ -75,7 +75,7 @@ public final class CardCodec {
         Map<String, String> f = md.fields();
         List<String> errors = validate(f);
         if (!errors.isEmpty()) {
-            return new Parsed(null, 0, errors, List.of());
+            return new Parsed(null, errors, List.of());
         }
         String[] ref = f.getOrDefault("source", "inline").split("/", -1);
         String sourceType = ref[0];
@@ -105,7 +105,6 @@ public final class CardCodec {
                 Names.fileNameToVarName(fileBase),
                 f.get("title"),
                 type,
-                toInt(f.get("order")),
                 sourceType,
                 sourceName,
                 script,
@@ -118,7 +117,7 @@ public final class CardCodec {
                 code,
                 null,
                 null);
-        return new Parsed(card, card.order(), List.of(), warnings);
+        return new Parsed(card, List.of(), warnings);
     }
 
     /** Frontmatter schema of a card file: one {@code "key: problem"} per violation. */
@@ -128,7 +127,6 @@ public final class CardCodec {
         if (title == null || title.isEmpty()) {
             errors.add("title: required");
         }
-        intProblem(f, "order", true, 1, Integer.MAX_VALUE).ifPresent(errors::add);
         String source = f.get("source");
         if (source != null) {
             if (!SOURCE_REF.matcher(source).matches()) {

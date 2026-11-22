@@ -33,7 +33,7 @@ class FrameServiceTest {
     Path root;
 
     private Card card(String varName, String sourceType, String sourceName, String script, String code) {
-        return new Card(varName, varName, null, null, sourceType, sourceName, script, "", null,
+        return new Card(varName, varName, null, sourceType, sourceName, script, "", null,
                 null, null, null, null, code, null, null);
     }
 
@@ -53,6 +53,8 @@ class FrameServiceTest {
         Path card = root.resolve("demo/testframe/frames/main-flow/step-1/get-all.md");
         assertTrue(Files.readString(card).endsWith("-------------------\n-------------------\n") || Files.readString(card).endsWith("timeout: 5000\n-------------------\n"), "inherited body is stored empty");
         assertTrue(Files.exists(card.resolveSibling("get-all.result-data.md")));
+        assertEquals("-------------------\n-------------------\nget-all\npayload\n",
+                Files.readString(card.resolveSibling("flow.md")), "the step flow maps the card sequence");
 
         FramesResponse loaded = frames.load("demo");
         assertEquals(List.of(), loaded.errors());
