@@ -61,7 +61,7 @@ class CardCodecTest {
         assertEquals("mongo", getActive.sourceType());
         assertEquals("find", getActive.subtype());
         assertEquals("products", getActive.collection());
-        assertEquals("{\n  \"filter\": { \"ativo\": true }\n}", getActive.code(),
+        assertEquals("[\n  { \"ativo\": true }\n]", getActive.code(),
                 "the card holds its own code");
         Card activeProducts = frame.steps().getFirst().cards().get(1);
         assertEquals("rawvalue", activeProducts.sourceType(), "every card declares its type-source");
@@ -128,6 +128,9 @@ class CardCodecTest {
                 Map.entry("openapi/restapi", "request js"), Map.entry("openapi/swagger", "request json"),
                 Map.entry("openapi/graphql", "request js"),
                 Map.entry("mongo/find", "query json"), Map.entry("mongo/aggregation", "query json"),
+                Map.entry("mongo/deleteOne", "query json"), Map.entry("mongo/deleteMany", "query json"),
+                Map.entry("mongo/updateOne", "query json"), Map.entry("mongo/updateMany", "query json"),
+                Map.entry("mongo/insertOne", "query json"), Map.entry("mongo/insertMany", "query json"),
                 Map.entry("sql/oracle", "sql sql"), Map.entry("sql/postgres", "sql sql"), Map.entry("sql/mysql", "sql sql"),
                 Map.entry("sql/sqlserver", "sql sql"),
                 Map.entry("jsonassert/script", "jsonassert jsonassert"), Map.entry("jsonassert/conditional", "condition jsonassert"),
@@ -163,9 +166,9 @@ class CardCodecTest {
 
     @Test
     void subtypeIsRequiredExactlyForTypesWithSubtypes() {
-        assertEquals(List.of("subtype: required for mongo (find, aggregation)"),
+        assertEquals(List.of("subtype: required for mongo (find, aggregation, deleteOne, deleteMany, updateOne, updateMany, insertOne, insertMany)"),
                 CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "collection", "x")));
-        assertEquals(List.of("subtype: unknown subtype \"update\" of mongo (find, aggregation)"),
+        assertEquals(List.of("subtype: unknown subtype \"update\" of mongo (find, aggregation, deleteOne, deleteMany, updateOne, updateMany, insertOne, insertMany)"),
                 CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "update", "collection", "x")));
         assertEquals(List.of("subtype: unknown subtype \"find\" of rawvalue (json)"),
                 CardCodec.validate(Map.of("title", "A", "source", "rawvalue", "subtype", "find")));
@@ -201,7 +204,7 @@ class CardCodecTest {
     @Test
     void mongoCardsNameTheirCollection() {
         Card find = new Card("getAll", "Get all", null, "mongo", "find", "products", "db", "", null, null,
-                null, null, null, null, "{ \"filter\": {} }", null, null);
+                null, null, null, null, "[ {} ]", null, null);
         String md = CardCodec.render(find);
         assertTrue(md.startsWith("""
                 -------------------
@@ -213,9 +216,9 @@ class CardCodecTest {
                 -------------------
                 """), md);
         assertEquals("products", CardCodec.parse("get-all", md).card().collection());
-        assertEquals(List.of("collection: required on mongo cards (the collection the query reads)"),
+        assertEquals(List.of("collection: required on mongo cards (the collection the call works on)"),
                 CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find")));
-        assertEquals(List.of("collection: system collections cannot be queried"),
+        assertEquals(List.of("collection: system collections cannot be used"),
                 CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find", "collection", "system.users")));
         assertEquals(List.of("collection: only mongo cards name a collection"),
                 CardCodec.validate(Map.of("title", "A", "source", "rawvalue", "subtype", "json", "collection", "x")));

@@ -48,8 +48,15 @@ public final class Catalog {
                     new Kind("swagger", "request", "json", "swagger"),
                     new Kind("graphql", "request", "js", "request"))),
             new Type("mongo", "json", true, List.of(
+                    // the body is the array of the call's positional arguments (format/MongoCall)
                     new Kind("find", "query", "json", "mongo"),
-                    new Kind("aggregation", "query", "json", "mongo"))),
+                    new Kind("aggregation", "query", "json", "mongo"),
+                    new Kind("deleteOne", "query", "json", "mongo"),
+                    new Kind("deleteMany", "query", "json", "mongo"),
+                    new Kind("updateOne", "query", "json", "mongo"),
+                    new Kind("updateMany", "query", "json", "mongo"),
+                    new Kind("insertOne", "query", "json", "mongo"),
+                    new Kind("insertMany", "query", "json", "mongo"))),
             new Type("sql", "sql", true, List.of(
                     new Kind("oracle", "sql", "sql", "query"),
                     new Kind("postgres", "sql", "sql", "query"),

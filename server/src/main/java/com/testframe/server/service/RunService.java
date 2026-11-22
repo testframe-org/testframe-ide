@@ -10,7 +10,7 @@ import com.testframe.server.dto.Step;
 import com.testframe.server.format.Catalog;
 import com.testframe.server.format.CodeRules;
 import com.testframe.server.format.JsonassertCode;
-import com.testframe.server.format.MongoQuery;
+import com.testframe.server.format.MongoCall;
 import com.testframe.server.format.Names;
 import com.testframe.server.openapi.OpenApiService;
 import com.testframe.server.openapi.OpenApiSpec;
@@ -422,7 +422,7 @@ public class RunService {
         long began = System.nanoTime();
         try {
             String body = Names.isBlank(code) ? "" : json.writeValueAsString(Bindings.substitute(parse(code), vars, json));
-            MongoQuery query = MongoQuery.parse(subtype, card.collection(), body);
+            MongoCall query = MongoCall.parse(subtype, card.collection(), body);
             String uri = sources.baseUrl(project, "mongo", card.sourceName());
             Map<String, Object> envelope = json.readValue(mongo.run(uri, query, timeout), MAP);
             Object value = envelope.get("result");

@@ -53,13 +53,13 @@ class FrameServiceTest {
         sources.save("demo", List.of(new Source("mongo", "db", "mongodb://localhost/x", "")));
 
         frames.save("demo", new Frame("Main Flow", List.of(new Step(1, List.of(
-                card("getAll", "mongo", "db", "{\n  \"filter\": {}\n}").withPrivateData("token: t"),
+                card("getAll", "mongo", "db", "[ {}  ,\n      { \"nome\":1 } ]  ").withPrivateData("token: t"),
                 card("payload", "rawvalue", "", "{}"))))));
         frames.saveResult("demo", "Main Flow", 1, "getAll", new CardRun("success", "ok", "[]", "0.1s", "2026-11-21T00:00:00Z"));
 
         Path card = root.resolve("demo/testframe/frames/main-flow/step-1/get-all.md");
-        assertTrue(Files.readString(card).endsWith("-------------------\nfilter\n```json\n{}\n```\n"),
-                "the card holds its own code (mongo: labeled sections)");
+        assertTrue(Files.readString(card).endsWith("-------------------\n```json\n[\n  {},\n  { \"nome\": 1 }\n]\n```\n"),
+                "the mongo arguments are stored canonically formatted");
         assertTrue(Files.exists(card.resolveSibling("get-all.private.md")));
         assertTrue(Files.exists(card.resolveSibling("get-all.cache.md")));
         assertEquals("-------------------\n-------------------\nget-all\npayload\n",
@@ -68,7 +68,7 @@ class FrameServiceTest {
         FramesResponse loaded = frames.load("demo");
         assertEquals(List.of(), loaded.errors());
         Card getAll = loaded.frames().getFirst().steps().getFirst().cards().getFirst();
-        assertEquals("{\n  \"filter\": {}\n}", getAll.code());
+        assertEquals("[\n  {},\n  { \"nome\": 1 }\n]", getAll.code(), "the reload returns the formatted code");
         assertEquals("find", getAll.subtype());
         assertEquals("token: t", getAll.privateData());
         assertEquals("success", getAll.lastRun().status());
@@ -108,10 +108,10 @@ class FrameServiceTest {
         mvc.perform(post("/api/v2/frames").contentType("application/json").content("""
                         {"project": "demo", "frame": {"name": "main", "steps": [{"number": 1, "cards": [
                           {"varName": "q", "title": "Q", "sourceType": "mongo", "subtype": "aggregation", "collection": "x", "sourceName": "db",
-                           "code": "{\\"aggregation\\": [{\\"$merge\\": \\"y\\"}]}"}]}]}}
+                           "code": "[[{\\"$merge\\": \\"y\\"}]]"}]}]}}
                         """))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("step 1 \"Q\": code: write stage \"$merge\" is not allowed (mongo cards are read-only)"));
+                .andExpect(jsonPath("$.message").value("step 1 \"Q\": code: arg 1 (pipeline): stage \"$merge\" is not allowed in mongo cards"));
 
         // every card declares its type-source and a subtype when the type has them
         mvc.perform(post("/api/v2/frames").contentType("application/json").content("""
@@ -121,8 +121,8 @@ class FrameServiceTest {
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("step 1 \"A\": source: required ({type-source}/{name-source}, or rawvalue); "
-                        + "step 1 \"B\": subtype: required for mongo (find, aggregation); "
-                        + "step 1 \"B\": collection: required on mongo cards (the collection the query reads)"));
+                        + "step 1 \"B\": subtype: required for mongo (find, aggregation, deleteOne, deleteMany, updateOne, updateMany, insertOne, insertMany); "
+                        + "step 1 \"B\": collection: required on mongo cards (the collection the call works on)"));
 
         mvc.perform(post("/api/v2/sources").contentType("application/json").content("""
                         {"project": "demo", "sources": [{"typeSource": "jsonassert", "name": "rules"}]}

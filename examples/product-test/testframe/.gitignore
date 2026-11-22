@@ -1,2 +1,4 @@
-# Generated local files: last run of each card, openapi spec caches
-*.cache.md
+# Written by the TestFrame IDE: private data and the IDE build cache are never versioned
+*.private.md
+*.private.yaml
+.testframebuild/

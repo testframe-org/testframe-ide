@@ -2,21 +2,39 @@
   "name": "testframe-ide",
   "private": true,
   "type": "module",
-  "description": "TestFrame IDE: flow editor client + framework server. Runner scripts under scripts/ take every setting as parameters; the repo-root scripts/ resolve configuration and invoke them.",
+  "description": "TestFrame IDE (Next.js): the authoring side. Owns the project format (frames, cards, the sources*.yaml layers) and edits it; runs cards through the runner plugin (TESTFRAME_RUNNER_URL). Module scripts under scripts/ take every setting as parameters.",
   "scripts": {
-    "dev": "bun scripts/dev.ts",
-    "dev:server": "bun scripts/dev-server.ts",
-    "dev:client": "bun scripts/dev-client.ts",
-    "build": "bun run build:client & bun run build:server & wait",
-    "build:client": "cd client && bun run build",
-    "build:server": "cd server && ./mvnw -q -DskipTests package",
-    "typecheck": "cd client && bun run typecheck",
-    "test": "bun run test:server && bun run test:client",
-    "test:server": "cd server && ./mvnw -q test",
-    "test:client": "cd client && bun run build",
-    "install:client": "cd client && bun install"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@radix-ui/react-alert-dialog": "^1.2.1",
+    "@radix-ui/react-dialog": "^1.3.1",
+    "@radix-ui/react-label": "^2.1.17",
+    "@radix-ui/react-select": "^2.4.1",
+    "@radix-ui/react-slot": "^1.5.0",
+    "@radix-ui/react-switch": "^1.4.1",
+    "bson": "^7.3.4",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.72.0",
+    "next": "16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwind-merge": "^3.7.0",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@tailwindcss/postcss": "^4.3.5",
+    "@types/bun": "latest",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^6.0.3"
   }
 }

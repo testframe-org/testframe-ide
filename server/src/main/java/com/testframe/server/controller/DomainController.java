@@ -2,7 +2,7 @@ package com.testframe.server.controller;
 
 import com.testframe.server.format.Catalog;
 import com.testframe.server.format.CodeRules;
-import com.testframe.server.format.MongoQuery;
+import com.testframe.server.format.MongoCall;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -23,11 +23,11 @@ public class DomainController {
 
     /**
      * One card kind of a type: {@code subtype} is null for types without subtypes;
-     * {@code sections} are the labeled body sections of mongo cards (empty otherwise).
+     * {@code args} is the signature of a mongo call (its positional arguments, empty otherwise).
      */
     public record CardKindEntry(String subtype, String cardType, String language, String form,
                                 int defaultWidth, int defaultHeight, int defaultTimeout,
-                                List<MongoQuery.Section> sections) {
+                                List<MongoCall.Arg> args) {
     }
 
     /**
@@ -44,7 +44,12 @@ public class DomainController {
     public record ValidateRequest(String sourceType, String subtype, String code) {
     }
 
-    public record ValidateResponse(String problem) {
+    /**
+     * {@code problem}: the first problem (null when acceptable); {@code problems}: all of them
+     * (mongo: one per argument); {@code formatted}: the canonical text the save would store
+     * (mongo cards, null otherwise or when the code does not parse).
+     */
+    public record ValidateResponse(String problem, List<String> problems, String formatted) {
     }
 
     @GetMapping("/catalog")
@@ -55,7 +60,7 @@ public class DomainController {
                     Catalog.Size size = Catalog.defaultSize(kind.cardType());
                     return new CardKindEntry(kind.subtype(), kind.cardType(), kind.language(), kind.form(),
                             size.width(), size.height(), Catalog.defaultTimeout(kind.cardType()),
-                            "mongo".equals(type.name()) ? MongoQuery.sectionsOf(kind.subtype()) : List.of());
+                            "mongo".equals(type.name()) ? MongoCall.signatureOf(kind.subtype()) : List.of());
                 }).toList())).toList();
         return new CatalogResponse(entries, Catalog.HTTP_METHODS);
     }
@@ -63,6 +68,8 @@ public class DomainController {
     /** The code rule of a (type, subtype): {@code problem} is null when the code is acceptable. */
     @PostMapping("/validate")
     public ValidateResponse validate(@RequestBody ValidateRequest request) {
-        return new ValidateResponse(CodeRules.problem(request.sourceType(), request.subtype(), request.code()));
+        List<String> problems = CodeRules.problems(request.sourceType(), request.subtype(), request.code());
+        return new ValidateResponse(problems.isEmpty() ? null : problems.getFirst(), problems,
+                CodeRules.formatted(request.sourceType(), request.code()));
     }
 }

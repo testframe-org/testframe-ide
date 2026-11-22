@@ -23,11 +23,25 @@ public final class CodeRules {
         String text = code == null ? "" : code;
         String sub = subtype == null ? "" : subtype;
         return switch (sourceType == null ? "" : sourceType) {
-            case "mongo" -> MongoQuery.problem(sub.isEmpty() ? null : sub, text);
+            case "mongo" -> MongoCall.problem(sub.isEmpty() ? null : sub, text);
             case "sql" -> "oracle".equals(sub) ? sqlProblem(stripLineComments(text, "--")) : null;
             case "jsonassert" -> JsonassertCode.problem(sub, text);
             default -> null;
         };
+    }
+
+    /** Every problem of the code (mongo: one per argument, e.g. {@code arg 3 (options): unknown key "foo"}). */
+    public static List<String> problems(String sourceType, String subtype, String code) {
+        if ("mongo".equals(sourceType)) {
+            return MongoCall.problems(subtype == null || subtype.isEmpty() ? null : subtype, code);
+        }
+        String problem = problem(sourceType, subtype, code);
+        return problem == null ? List.of() : List.of(problem);
+    }
+
+    /** The canonical text the save stores (mongo arrays, see {@link MongoJson}), or null when there is none. */
+    public static String formatted(String sourceType, String code) {
+        return "mongo".equals(sourceType) ? MongoJson.format(code) : null;
     }
 
     private static String sqlProblem(String body) {

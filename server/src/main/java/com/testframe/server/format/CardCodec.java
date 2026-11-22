@@ -93,16 +93,7 @@ public final class CardCodec {
             height = Integer.valueOf(wh[1]);
         }
         String endpoint = f.getOrDefault("endpoint", "");
-        String code;
-        if (MONGO.equals(sourceType)) {
-            try {
-                code = MongoSections.parse(subtype, md.body());
-            } catch (IllegalArgumentException e) {
-                return new Parsed(null, List.of("body: " + e.getMessage()), List.of());
-            }
-        } else {
-            code = MdEnvelope.unfence(md.body());
-        }
+        String code = MdEnvelope.unfence(md.body());
         Card card = new Card(
                 Names.fileNameToVarName(fileBase),
                 f.get("title"),
@@ -154,7 +145,7 @@ public final class CardCodec {
         }
         String collection = f.get("collection");
         if (MONGO.equals(sourceType)) {
-            String problem = MongoQuery.collectionProblem(collection);
+            String problem = MongoCall.collectionProblem(collection);
             if (problem != null) {
                 errors.add("collection: " + problem);
             }
@@ -196,15 +187,15 @@ public final class CardCodec {
     }
 
     /**
-     * The body of a card file: one fenced block in the (type, subtype) language, or, for mongo
-     * cards, the labeled sections of the wire code ({@link MongoSections}; a code that is not an
-     * object of sections stays one fenced block, and the code rule reports why on save).
+     * The body of a card file: one fenced block in the (type, subtype) language. A mongo card's
+     * array of call arguments is stored in its canonical format ({@link MongoJson}); a draft that
+     * does not format is kept as written (the code rule reports why on save).
      */
     private static String body(String sourceType, String subtype, String code) {
         if (MONGO.equals(sourceType)) {
-            String sections = MongoSections.render(subtype, code);
-            if (sections != null) {
-                return sections;
+            String formatted = MongoJson.format(code);
+            if (formatted != null) {
+                return MdEnvelope.fence(Catalog.languageOf(sourceType, subtype), formatted);
             }
         }
         return MdEnvelope.fence(Catalog.languageOf(sourceType, subtype), code);

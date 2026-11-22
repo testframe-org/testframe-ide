@@ -1,13 +1,26 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "lib": ["ESNext"],
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["bun"],
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "allowJs": false,
+    "incremental": true,
+    "types": ["bun", "node"],
+    "plugins": [{ "name": "next" }],
+    "paths": {
+      "@/*": ["./*"],
+      "@jsonassert/jsonassert-js": ["../jsonassert/modules/jsonassert-js/src/index.ts"]
+    }
   },
-  "include": ["scripts"]
+  "include": ["next-env.d.ts", "app", "lib", "editor", "tests", "scripts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules", "server", "client", "examples"]
 }

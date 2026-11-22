@@ -27,7 +27,12 @@ class DomainControllerTest {
                 .andExpect(jsonPath("$.sourceTypes[0].cards[0].defaultTimeout").value(5000))
                 .andExpect(jsonPath("$.sourceTypes[0].cards[1].subtype").value("swagger"))
                 .andExpect(jsonPath("$.sourceTypes[0].cards[1].form").value("swagger"))
-                .andExpect(jsonPath("$.sourceTypes[1].subtypes").value(contains("find", "aggregation")))
+                .andExpect(jsonPath("$.sourceTypes[1].subtypes").value(contains("find", "aggregation", "deleteOne", "deleteMany",
+                        "updateOne", "updateMany", "insertOne", "insertMany")))
+                .andExpect(jsonPath("$.sourceTypes[1].cards[0].args[*].name").value(contains("filter", "projection", "options")))
+                .andExpect(jsonPath("$.sourceTypes[1].cards[0].args[2].options[*].name").value(contains(
+                        "sort", "limit", "skip", "maxTimeMS", "collation", "hint", "comment")))
+                .andExpect(jsonPath("$.sourceTypes[1].cards[4].args[1].kind").value("update"))
                 .andExpect(jsonPath("$.sourceTypes[1].language").value("json"))
                 .andExpect(jsonPath("$.sourceTypes[1].cards[1].cardType").value("query"))
                 .andExpect(jsonPath("$.sourceTypes[1].cards[1].form").value("mongo"))
@@ -48,12 +53,14 @@ class DomainControllerTest {
     @Test
     void validateReturnsTheCodeRuleProblemOrNull() throws Exception {
         mvc.perform(post("/api/v2/validate").contentType("application/json")
-                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"aggregation\", \"code\": \"{\\\"aggregation\\\": [{\\\"$out\\\": \\\"y\\\"}]}\"}"))
+                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"aggregation\", \"code\": \"[[{\\\"$out\\\": \\\"y\\\"}]]\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.problem").value("write stage \"$out\" is not allowed (mongo cards are read-only)"));
+                .andExpect(jsonPath("$.problem").value("arg 1 (pipeline): stage \"$out\" is not allowed in mongo cards"))
+                .andExpect(jsonPath("$.problems.length()").value(1))
+                .andExpect(jsonPath("$.formatted").value("[\n  [{ \"$out\": \"y\" }]\n]"));
 
         mvc.perform(post("/api/v2/validate").contentType("application/json")
-                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"find\", \"code\": \"{\\\"filter\\\": {}}\"}"))
+                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"find\", \"code\": \"[{}]\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.problem").doesNotExist());
 

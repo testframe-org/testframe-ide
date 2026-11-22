@@ -1,0 +1,7 @@
+environments: [local]
+openapi:
+  product-api:
+    base-url: http://localhost:18081/api/docs/openapi.json
+mongo:
+  products-db:
+    base-url: mongodb://localhost:27017/products

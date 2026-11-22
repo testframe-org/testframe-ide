@@ -215,40 +215,44 @@ class RunServiceTest {
     @Test
     void invalidCodeFailsTheCardBeforeItRuns() {
         FrameRunResponse r = run(new Step(1, List.of(
-                mongoCard("wipe", "db", "{\"filter\": {}, \"remove\": true}"),
+                mongoCard("wipe", "db", "[{}, null, {\"remove\": true}]"),
                 card("never", "rawvalue", "{}"))));
 
         assertEquals(1, r.results().size());
         assertEquals("error", r.results().getFirst().status());
-        assertTrue(r.results().getFirst().text().contains("unknown key \"remove\""));
+        assertTrue(r.results().getFirst().text().contains("arg 3 (options): unknown key \"remove\""), r.results().getFirst().text());
         assertTrue(r.results().getFirst().output().contains("find accepts"));
     }
 
     @Test
     void mongoCardsFailCleanlyWithoutSourceOrSavedFile() throws IOException {
-        FrameRunResponse noSource = run(new Step(1, List.of(mongoCard("q", "", "{}"))));
+        FrameRunResponse noSource = run(new Step(1, List.of(mongoCard("q", "", "[{}]"))));
         assertEquals("error", noSource.results().getFirst().status());
         assertTrue(noSource.results().getFirst().text().contains("no mongo source"));
 
-        FrameRunResponse missingFile = run(new Step(1, List.of(mongoCard("q", "db", "{}"))));
+        FrameRunResponse missingFile = run(new Step(1, List.of(mongoCard("q", "db", "[{}]"))));
         assertEquals("error", missingFile.results().getFirst().status(),
                 "the connection comes from the saved source file only");
         assertTrue(missingFile.results().getFirst().text().contains("not found"),
                 missingFile.results().getFirst().text());
 
-        // with a saved source, the read-only rules still apply before anything connects
+        // with a saved source, the guards still apply before anything connects
         sources.save("demo", List.of(new Source("mongo", "db", "mongodb://127.0.0.1:1/demo", "")));
-        FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "{}")
-                .withSubtype("aggregation").withCode("{\"aggregation\": [{\"$out\": \"y\"}]}"))));
+        FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "[]")
+                .withSubtype("aggregation").withCode("[[{\"$out\": \"y\"}]]"))));
         assertEquals("error", write.results().getFirst().status());
         assertTrue(write.results().getFirst().text().contains("$out"), write.results().getFirst().text());
+        FrameRunResponse wipe = run(new Step(1, List.of(mongoCard("q", "db", "[]")
+                .withSubtype("deleteMany").withCode("[{}]"))));
+        assertEquals("error", wipe.results().getFirst().status());
+        assertTrue(wipe.results().getFirst().text().contains("non-empty filter"), wipe.results().getFirst().text());
     }
 
     @Test
     void unreachableMongoIsReportedClearlyOnTheCard() throws IOException {
         // the source saves fine; the database behind its base-url simply is not there
         sources.save("demo", List.of(new Source("mongo", "down", "mongodb://127.0.0.1:1/demo", "")));
-        FrameRunResponse r = run(new Step(1, List.of(mongoCard("q", "down", "{}"))));
+        FrameRunResponse r = run(new Step(1, List.of(mongoCard("q", "down", "[{}]"))));
         CardResult card = r.results().getFirst();
         assertEquals("error", card.status());
         // the driver names the real cause (socket open refused) on the card, and the run stops there

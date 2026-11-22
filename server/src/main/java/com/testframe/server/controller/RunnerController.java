@@ -4,7 +4,7 @@ import com.testframe.server.dto.FrameRunResponse;
 import com.testframe.server.dto.RunCardRequest;
 import com.testframe.server.dto.RunCardResponse;
 import com.testframe.server.dto.RunFrameRequest;
-import com.testframe.server.format.MongoQuery;
+import com.testframe.server.format.MongoCall;
 import com.testframe.server.runner.MongoRunner;
 import com.testframe.server.service.LocalServerUrl;
 import com.testframe.server.service.RunService;
@@ -62,10 +62,10 @@ public class RunnerController {
         if (blank(request.project()) || blank(request.source()) || blank(request.collection())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "project, source and collection are required");
         }
-        MongoQuery query;
+        MongoCall query;
         try {
             // the body is validated (read-only, known keys) before the source is even read
-            query = MongoQuery.parse(request.subtype(), request.collection(), request.body());
+            query = MongoCall.parse(request.subtype(), request.collection(), request.body());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }

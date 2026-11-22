@@ -2,6 +2,8 @@ package com.testframe.server.format;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,24 +12,28 @@ class CodeRulesTest {
 
     @Test
     void mongoBodiesFollowTheCardSubtype() {
-        String find = "{\"filter\": {\"ativo\": true}, \"limit\": 5}";
-        String aggregation = "{\"aggregation\": [{\"$match\": {\"ativo\": true}}]}";
-        assertNull(CodeRules.problem("mongo", "find", find));
+        String find = "[{\"ativo\": true}, null, {\"limit\": 5}]";
+        String aggregation = "[[{\"$match\": {\"ativo\": true}}]]";
+        assertNull(CodeRules.problem("mongo", "find", "[{\"ativo\": true}, {}, {\"limit\": 5}]"));
         assertNull(CodeRules.problem("mongo", "aggregation", aggregation));
         assertNull(CodeRules.problem("mongo", "find", ""));
         assertNull(CodeRules.problem("mongo", "aggregation", null));
-        assertEquals("unknown key \"aggregation\" (find accepts filter, projection, sort, limit, skip, maxTimeMS, collation, hint, comment)",
-                CodeRules.problem("mongo", "find", aggregation));
-        assertEquals("unknown key \"filter\" (aggregation accepts aggregation, allowDiskUse, maxTimeMS, batchSize, collation, hint, comment, let)",
-                CodeRules.problem("mongo", "aggregation", find));
+        assertEquals("arg 1 (filter): must be an object", CodeRules.problem("mongo", "find", aggregation));
+        assertEquals("arg 1 (pipeline): must be an array of stages", CodeRules.problem("mongo", "aggregation", "[{\"ativo\": true}]"));
+        assertTrue(CodeRules.problem("mongo", "aggregation", find).startsWith("aggregation takes at most 2 arguments"));
+        assertEquals(List.of("arg 2 (projection): must be an object", "arg 3 (options): unknown key \"foo\" "
+                        + "(find accepts sort, limit, skip, maxTimeMS, collation, hint, comment)"),
+                CodeRules.problems("mongo", "find", "[{}, [], {\"foo\": 1}]"), "one problem per argument");
+        assertEquals("[\n  { \"ativo\": true }\n]", CodeRules.formatted("mongo", "[ {\"ativo\" :true} ]"));
+        assertNull(CodeRules.formatted("rawvalue", "{}"));
     }
 
     @Test
     void mongoWithoutSubtypeHasNoRuleYet() {
         // the missing subtype itself is reported by the card/script validation
         assertNull(CodeRules.problem("mongo", null, "db.x.find()"));
-        assertEquals("write stage \"$out\" is not allowed (mongo cards are read-only)",
-                CodeRules.problem("mongo", "aggregation", "{\"aggregation\": [{\"$out\": \"y\"}]}"));
+        assertEquals("arg 1 (pipeline): stage \"$out\" is not allowed in mongo cards",
+                CodeRules.problem("mongo", "aggregation", "[[{\"$out\": \"y\"}]]"));
     }
 
     @Test
