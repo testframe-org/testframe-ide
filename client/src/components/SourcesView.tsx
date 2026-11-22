@@ -1,7 +1,7 @@
 import React from 'react';
 import { Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle, FileCode2 } from 'lucide-react';
 import { ApiError, testframeApi } from '../client-api';
-import { SOURCE_TYPES, hasScripts, validateSourceCode } from '../frames';
+import { SOURCE_TYPES, hasScripts } from '../catalog';
 import { useI18n } from '../i18n';
 import type { LogLevel, SourceDef, SourceScript } from '../types';
 
@@ -58,22 +58,9 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
     setErrors([]);
   };
 
-  // Code rules per source type are checked here; names, types and the file layout are validated
-  // by the server on save (its 400 reasons land in the same error list)
-  const validate = (): boolean => {
-    const issues: string[] = [];
-    sources.forEach((s, i) => {
-      (s.scripts ?? []).forEach((script, j) => {
-        const problem = validateSourceCode(s.typeSource, script.body);
-        if (problem) issues.push(`Source ${i + 1} (${s.name || '?'}): scripts.${j}.body: ${script.name}: ${problem}`);
-      });
-    });
-    setErrors(issues);
-    return issues.length === 0;
-  };
-
+  // Names, types, the file layout and the code rules per source type are all validated by
+  // the server on save (its 400 reasons land in the error list below)
   const saveAll = async () => {
-    if (!validate()) return;
     setSaving(true);
     try {
       const data = await testframeApi.saveSources(project, sources);

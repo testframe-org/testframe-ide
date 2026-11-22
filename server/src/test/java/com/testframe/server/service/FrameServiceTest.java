@@ -92,6 +92,21 @@ class FrameServiceTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Source 1 (../x): name: use letters, digits, dot, hyphen and underscore"));
 
+        // Phase 2: the code rules per source type are enforced on both saves
+        mvc.perform(post("/api/v2/frames").contentType("application/json").content("""
+                        {"project": "demo", "frame": {"name": "main", "steps": [{"number": 1, "cards": [
+                          {"varName": "q", "title": "Q", "sourceType": "mongo", "sourceName": "db", "code": "db.x.deleteMany({})"}]}]}}
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("step 1 \"Q\": code: mongo operation \"deleteMany\" is not allowed (find, findOne, aggregate, countDocuments, distinct)"));
+
+        mvc.perform(post("/api/v2/sources").contentType("application/json").content("""
+                        {"project": "demo", "sources": [{"typeSource": "assert", "name": "rules",
+                          "scripts": [{"name": "bad", "body": "expect(x).toBe(y)"}]}]}
+                        """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Source 1 (rules): scripts.0.body: not a jsonassert line: expect(x).toBe(y)"));
+
         mvc.perform(get("/api/v2/frames/demo"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.frames").isEmpty())

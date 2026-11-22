@@ -1,5 +1,7 @@
 import { AlertTriangle, CheckCircle2, ExternalLink } from 'lucide-react';
-import { HTTP_METHODS, endpointParts, validateSourceCode } from '../frames';
+import { useEffect, useState } from 'react';
+import { HTTP_METHODS, checkSourceCode } from '../catalog';
+import { endpointParts } from '../frames';
 import { useI18n } from '../i18n';
 import type { Card, SourceDef } from '../types';
 
@@ -139,8 +141,19 @@ export function SourceForm({ card, source, onChange }: SourceFormProps) {
   const { t } = useI18n();
   const kind = formKindOf(card.sourceType || 'inline');
   const setCode = (code: string) => onChange({ code });
-  // Per-type rule (mongo: one shell call, oracle: one SELECT, assert: jsonassert lines)
-  const problem = validateSourceCode(card.sourceType || 'inline', card.code);
+  // Per-type rule (mongo: one shell call, oracle: one SELECT, assert: jsonassert lines),
+  // answered by the server (POST /api/v2/validate, cached): the save answers 400 anyway
+  const [problem, setProblem] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const timer = setTimeout(() => {
+      checkSourceCode(card.sourceType || 'inline', card.code).then((p) => alive && setProblem(p));
+    }, 120);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [card.sourceType, card.code]);
 
   switch (kind) {
     case 'http': {

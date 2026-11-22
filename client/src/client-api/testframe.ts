@@ -1,4 +1,4 @@
-import type { CardRunResult, FrameData, FramesLoadResponse, FramesSaveResponse, SourceDef } from '../types';
+import type { CardRunResult, CatalogResponse, FrameData, FramesLoadResponse, FramesSaveResponse, SourceDef } from '../types';
 import { requestJson } from './http';
 
 export interface HealthResponse {
@@ -27,6 +27,11 @@ export interface SourcesLoadResponse {
   sources: SourceDef[];
 }
 
+// POST /api/v2/validate: the server's code rule for a source type (null = acceptable)
+export interface ValidateResponse {
+  problem: string | null;
+}
+
 const json = (method: string, body: unknown): RequestInit => ({
   method,
   body: JSON.stringify(body)
@@ -35,6 +40,12 @@ const json = (method: string, body: unknown): RequestInit => ({
 // Framework API (testframe-server)
 export const testframeApi = {
   health: () => requestJson<HealthResponse>('/api/v2/health'),
+
+  // Source types, card types, fence language, defaults, HTTP methods and mongo ops (Phase 2)
+  loadCatalog: () => requestJson<CatalogResponse>('/api/v2/catalog'),
+
+  validateCode: async (sourceType: string, code: string): Promise<string | null> =>
+    (await requestJson<ValidateResponse>('/api/v2/validate', json('POST', { sourceType, code }))).problem,
 
   listProjects: () => requestJson<ProjectSummary[]>('/api/v2/projects'),
 

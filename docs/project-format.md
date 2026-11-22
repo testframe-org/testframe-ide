@@ -115,9 +115,9 @@ card. The editor shows it under the card's script and in the card editor.
 
 ## Code rules per source type
 
-`validateSourceCode` in `client/src/frames.ts` is enforced by the editor in the card editor,
-before a run, before a frame save and before a source save (scripts). It moves to the server in
-Phase 2 (see `TODO.md`):
+The rules live in the server (`format/CodeRules`). They are enforced on both saves (a rejected
+frame or source answers 400 with every problem) and served for live feedback in the editors
+(`POST /api/v2/validate`, called by the card form and cached per code; empty code is a draft):
 
 | type-source | Accepted code |
 |---|---|
@@ -168,6 +168,10 @@ The API exchanges structured JSON; the server builds every path and file. Full s
   still validates every path: it strips `..`, applies a character whitelist, checks that the
   path stays under the projects dir, accepts only `.md` files, and never allows a scope equal
   to the `frames/` or `sources/` root.
+- `GET /api/v2/catalog`: source types with their card type, fence language, `hasScripts` and
+  default size/timeout, plus the HTTP methods and the allowed mongo operations. `POST
+  /api/v2/validate` `{sourceType, code}`: the code rule of the type (`problem` = null when ok).
+  The editor loads the catalog at boot and keeps no local copies of these definitions.
 
 ## Example
 

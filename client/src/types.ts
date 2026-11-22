@@ -90,6 +90,23 @@ export interface Frame {
   steps: Step[];
 }
 
+// --- Wire shapes of GET /api/v2/catalog (the server owns the domain definitions) ---
+export interface CatalogEntry {
+  name: string;
+  cardType: CardType;
+  language: string;
+  hasScripts: boolean;
+  defaultWidth: number;
+  defaultHeight: number;
+  defaultTimeout: number;
+}
+
+export interface CatalogResponse {
+  sourceTypes: CatalogEntry[];
+  httpMethods: string[];
+  mongoOps: string[];
+}
+
 // --- Wire shapes of GET/POST /api/v2/frames (the server owns the .md format) ---
 // type and httpMethod are derived by the server (ignored on save), as are step numbers
 // (positions); the card sequence in a step comes from its flow.md. lastRun is the card's

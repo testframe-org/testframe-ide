@@ -21,12 +21,14 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   Here: `framesFromApi` / `frameToApi` (JSON ↔ in-memory `Frame`/`Card`, card ids
   `{frame}/step-{n}/{var-file}`), `pickFrame`, `cardVarName`, name helpers mirrored from the
   server for live feedback (`slug`, `toVarName`, `normalizeVarName`, `varNameToFileName`),
-  `validateSourceCode` + `frameCodeProblems` (code rules per source type, checked before save
-  until Phase 2 moves them to the server), `cardTypeOf` + `DEFAULT_CARD_SIZE`/`DEFAULT_TIMEOUT`
-  (until the server serves a catalog), `endpointParts` and `substituteTemplates` for
-  `{{varName.path}}` bindings (runner, Phase 3).
-- `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `HttpResult`...) and the frames
-  wire shapes (`CardData`, `FrameData`, `FramesLoadResponse`)
+  `endpointParts` and `substituteTemplates` for `{{varName.path}}` bindings (runner, Phase 3).
+- `src/catalog.ts` — the domain definitions served by the server (Phase 2): `loadCatalog()`
+  (called once at boot, before frames load) fills `SOURCE_TYPES`, `HTTP_METHODS`,
+  `DEFAULT_CARD_SIZE`/`DEFAULT_TIMEOUT`, `cardTypeOf` and `hasScripts`; `checkSourceCode()`
+  answers the per-type code rule via `POST /api/v2/validate` (cached per code). No client
+  copies of these rules exist anymore.
+- `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `HttpResult`...) and the wire
+  shapes (`CardData`, `FrameData`, `FramesLoadResponse`, `CatalogEntry`, `CatalogResponse`)
 
 ## Commands
 

@@ -51,6 +51,10 @@ public final class SourceCodec {
                 if (problem != null) {
                     issues.add(label + "scripts." + j + ".name: " + problem);
                 }
+                String codeProblem = CodeRules.problem(s.typeSource(), scripts.get(j).body());
+                if (codeProblem != null) {
+                    issues.add(label + "scripts." + j + ".body: " + codeProblem);
+                }
             }
         }
         if (!issues.isEmpty()) {

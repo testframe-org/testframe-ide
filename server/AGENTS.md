@@ -16,6 +16,8 @@ All code comments and messages are in English.
 | `GET /api/v2/sources/{project}` | `{sources: [{typeSource, name, baseUrl, publicData, privateData, scripts: [{name, body}]}]}` |
 | `POST /api/v2/sources` | `{project, sources}`: validates (type, name pattern, camelCase script names) and replaces each sent source (`{type}/{name}.md`, `{name}.private.md`, `{name}/{script}.md`) |
 | `GET /api/v2/projects` | projects under the projects dir (folders with `testframe/`), most recent first |
+| `GET /api/v2/catalog` | `{sourceTypes[{name, cardType, language, hasScripts, defaultWidth, defaultHeight, defaultTimeout}], httpMethods, mongoOps}`: the domain definitions the editor consumes (it keeps no local copies) |
+| `POST /api/v2/validate` | `{sourceType, code}` → `{problem}` (null when acceptable): the code rule of the type (`format/CodeRules`, enforced on frame and source saves too) |
 | `POST /api/v2/run/mongo` | `{project, source, script}`: runs a read-only mongo script (`find`/`findOne`/`aggregate`/`countDocuments`/`distinct`, `.sort/.skip/.limit`) with Spring Data `MongoTemplate`; the connection is the `base-url` of `sources/mongo/{source}.md` |
 
 Errors are `{status, message}` (`controller/ApiExceptionHandler`): `ResponseStatusException`
@@ -25,12 +27,14 @@ joins every problem with `; `.
 ## Structure
 
 - `controller/` — FrameworkController, FrameController, SourceController, RunnerController,
-  ProjectController, AssertionController, ApiExceptionHandler (`@RestControllerAdvice`)
+  ProjectController, AssertionController, DomainController (catalog + validate),
+  ApiExceptionHandler (`@RestControllerAdvice`)
 - `format/` — **owner of the on-disk project format** (spec: `../docs/project-format.md`), plain
   classes without Spring, unit-tested (including a byte-exact round trip of every committed
   example file): `MdEnvelope` (frontmatter/body envelope), `Names` (slug, var-name ↔ kebab file
   name, camelCase and source-name rules), `Catalog` (source types, `cardTypeOf`, default size/
-  timeout per card type), `CardCodec` (card frontmatter, script inheritance, private and
+  timeout per card type, HTTP methods, fence language), `CodeRules` (code rules per source type:
+  mongo/oracle/assert), `CardCodec` (card frontmatter, script inheritance, private and
   `result-data` siblings), `FrameCodec` (frame directory ↔ `Frame`, var-name validation),
   `SourceCodec` (source files ↔ `Source`, validation). Format changes happen here first; the
   client only maps the JSON.

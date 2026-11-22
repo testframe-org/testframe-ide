@@ -64,7 +64,8 @@ class SourceCodecTest {
                 "Source 1 (x): typeSource: unknown type-source \"ftp\"",
                 "Source 1 (x): name: name too short",
                 "Source 2 (../db): name: use letters, digits, dot, hyphen and underscore",
-                "Source 2 (../db): scripts.0.name: script name must be camelCase"), e.issues());
+                "Source 2 (../db): scripts.0.name: script name must be camelCase",
+                "Source 2 (../db): scripts.0.body: mongo cards accept one mongo shell call, e.g. db.products.find({ ativo: true })"), e.issues());
     }
 
     @Test

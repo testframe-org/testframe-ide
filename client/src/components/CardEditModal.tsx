@@ -9,7 +9,8 @@ import {
   X,
   XCircle
 } from 'lucide-react';
-import { SOURCE_TYPES, cardTypeOf, cardVarName, normalizeVarName } from '../frames';
+import { SOURCE_TYPES, cardTypeOf } from '../catalog';
+import { cardVarName, normalizeVarName } from '../frames';
 import { useI18n } from '../i18n';
 import type { Card, CardRunResult, SelectedContext, SourceDef } from '../types';
 import { RunOutput } from './RunOutput';

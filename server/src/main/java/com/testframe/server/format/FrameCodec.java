@@ -97,6 +97,10 @@ public final class FrameCodec {
                         : scripts.body(card.sourceType(), card.sourceName(), card.script());
                 String content = CardCodec.render(card.withVarName(varName), script);
                 List<String> problems = CardCodec.validate(MdEnvelope.parse(content).fields());
+                String codeProblem = CodeRules.problem(card.sourceType(), card.code());
+                if (codeProblem != null) {
+                    problems.add("code: " + codeProblem);
+                }
                 if (!problems.isEmpty()) {
                     problems.forEach(p -> issues.add(where + ": " + p));
                     continue;

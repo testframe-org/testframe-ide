@@ -12,6 +12,8 @@ public final class Catalog {
             "restapi", "swagger", "filter", "mapper", "assert", "kafka", "mongo",
             "oracle", "postgres", "mysql", "sqlserver", "graphql", "grpc", "inline");
 
+    public static final List<String> HTTP_METHODS = List.of("GET", "POST", "PUT", "PATCH", "DELETE");
+
     public record Size(int width, int height) {
     }
 

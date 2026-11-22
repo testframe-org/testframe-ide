@@ -16,21 +16,18 @@ import {
   FolderDown
 } from 'lucide-react';
 import {
-  DEFAULT_CARD_SIZE,
   DEFAULT_FRAME,
-  DEFAULT_TIMEOUT,
   cardVarName,
   endpointParts,
-  frameCodeProblems,
   frameToApi,
   framesFromApi,
   pickFrame,
   slug,
   substituteTemplates,
-  validateSourceCode,
   varNameToFileName
 } from './frames';
-import { runTargetRequest, testframeApi } from './client-api';
+import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT, checkSourceCode, loadCatalog } from './catalog';
+import { ApiError, runTargetRequest, testframeApi } from './client-api';
 import { useI18n } from './i18n';
 import { setProjectInUrl, touchRecentProject } from './recent-projects';
 import { ExecutionConsole } from './components/ExecutionConsole';
@@ -118,6 +115,15 @@ export default function App({ project, onSwitchProject }: AppProps) {
       }
 
       const project = slug(projectName);
+
+      // Domain definitions come from the server (catalog: source types, card types, defaults,
+      // HTTP methods); frames need them to map the card sizes, so this goes first
+      try {
+        await loadCatalog();
+      } catch (err) {
+        pushFrameMsg(t('catalogFail', { msg: (err as Error).message }), 'error');
+        return;
+      }
 
       // Silent auto-load of persisted sources and frames (sources first: cards may
       // inherit their body from a source script)
@@ -428,8 +434,8 @@ export default function App({ project, onSwitchProject }: AppProps) {
       card.code.toLowerCase().includes('expect(false).tobe(true)');
 
     let http: HttpResult | null = null;
-    // Per-source code rule: invalid code never runs
-    const codeProblem = validateSourceCode(card.sourceType, card.code);
+    // Per-source code rule (served by the server): invalid code never runs
+    const codeProblem = await checkSourceCode(card.sourceType, card.code);
     // Live source-script run (mongo): value published as the card's variable
     let live: { ok: boolean; summary: string; value: unknown; ms: number } | null = null;
     let assertion: { passed?: boolean; actual?: unknown; expected?: unknown; operator?: string } | null = null;
@@ -680,16 +686,16 @@ export default function App({ project, onSwitchProject }: AppProps) {
   };
 
   // --- PERSISTENCE: {project}/testframe/frames/{frame}/step-{n}/{var-file}.md ---
-  // The server validates and serializes the frame and replaces its directory, so removed cards
-  // do not linger on disk. Code rules per source type are still checked here first.
+  // The server validates (names, frontmatter, code rules per source type), serializes the
+  // frame, writes the step flow.md and replaces its directory, so removed cards do not
+  // linger on disk; a rejected save answers 400 with every problem.
   const saveFrames = async () => {
     try {
-      const problems = frameCodeProblems(steps);
-      if (problems.length) throw new Error(problems[0]);
       const data = await testframeApi.saveFrames(slug(projectName), frameToApi(frameName, steps));
       pushFrameMsg(t('framesSaved', { n: data.saved, root: data.root }), 'success');
     } catch (err) {
-      pushFrameMsg(t('framesSaveFail', { msg: (err as Error).message }), 'error');
+      const reason = err instanceof ApiError && err.reason ? err.reason : (err as Error).message;
+      pushFrameMsg(t('framesSaveFail', { msg: reason }), 'error');
     }
   };
   saveFramesRef.current = saveFrames;
