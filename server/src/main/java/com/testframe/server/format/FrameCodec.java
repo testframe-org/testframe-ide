@@ -13,7 +13,6 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
@@ -29,8 +28,8 @@ public final class FrameCodec {
     public static final String FLOW_FILE = "flow.md";
 
     private static final Pattern CARD_PATH = Pattern.compile("([a-z0-9][a-z0-9-]*)/step-(\\d{1,9})/([a-z0-9][a-z0-9-]*)\\.md");
-    private static final Pattern PRIVATE_PATH = Pattern.compile("([a-z0-9][a-z0-9-]*/step-\\d+/[a-z0-9][a-z0-9-]*)\\.private(\\.example)?\\.md");
-    private static final Pattern RESULT_PATH = Pattern.compile("([a-z0-9][a-z0-9-]*/step-\\d+/[a-z0-9][a-z0-9-]*)\\.result-data\\.md");
+    private static final Pattern PRIVATE_PATH = Pattern.compile("([a-z0-9][a-z0-9-]*/step-\\d+/[a-z0-9][a-z0-9-]*)\\.private\\.md");
+    private static final Pattern CACHE_PATH = Pattern.compile("([a-z0-9][a-z0-9-]*/step-\\d+/[a-z0-9][a-z0-9-]*)\\.cache\\.md");
     private static final Pattern FLOW_PATH = Pattern.compile("([a-z0-9][a-z0-9-]*)/step-(\\d{1,9})/" + FLOW_FILE);
 
     /** Files of one frame directory ({@code dir} = slug of the frame name). */
@@ -65,7 +64,7 @@ public final class FrameCodec {
      * stored (duplicate in the frame, lost by the kebab-case file name, or {@code flow}, the
      * reserved sequence file) or when a card's frontmatter would not load back.
      */
-    public static Written write(Frame frame, ScriptLookup scripts) {
+    public static Written write(Frame frame) {
         String dir = dirOf(frame.name());
         List<String> issues = new ArrayList<>();
         Map<String, String> seen = new LinkedHashMap<>();
@@ -92,12 +91,9 @@ public final class FrameCodec {
                     continue;
                 }
                 seen.put(varName, where);
-                Optional<String> script = card.script() == null || card.script().isEmpty()
-                        ? Optional.empty()
-                        : scripts.body(card.sourceType(), card.sourceName(), card.script());
-                String content = CardCodec.render(card.withVarName(varName), script);
+                String content = CardCodec.render(card.withVarName(varName));
                 List<String> problems = CardCodec.validate(MdEnvelope.parse(content).fields());
-                String codeProblem = CodeRules.problem(card.sourceType(), card.code());
+                String codeProblem = CodeRules.problem(card.sourceType(), card.subtype(), card.code());
                 if (codeProblem != null) {
                     problems.add("code: " + codeProblem);
                 }
@@ -127,19 +123,16 @@ public final class FrameCodec {
     /**
      * Groups the files under {@code frames/} into frames and steps. Each step's {@code flow.md}
      * gives the card sequence; cards it does not list are appended (file-name order) and
-     * reported. Invalid files are reported in {@code errors} and skipped; a real
-     * {@code .private.md} wins over its {@code .private.example.md}.
+     * reported. Invalid files are reported in {@code errors} and skipped.
      */
-    public static FramesResponse read(List<ProjectFile> files, ScriptLookup scripts) {
-        record Private(String body, boolean example) {
-        }
+    public static FramesResponse read(List<ProjectFile> files) {
         List<String> errors = new ArrayList<>();
-        Map<String, Private> privates = new LinkedHashMap<>();
+        Map<String, String> privates = new LinkedHashMap<>();
         Map<String, CardRun> results = new LinkedHashMap<>();
         Map<String, List<String>> flows = new LinkedHashMap<>();
         List<ProjectFile> cardFiles = new ArrayList<>();
         for (ProjectFile file : files) {
-            Matcher f = RESULT_PATH.matcher(file.path());
+            Matcher f = CACHE_PATH.matcher(file.path());
             if (f.matches()) {
                 results.put(f.group(1), CardCodec.parseResult(file.content()));
                 continue;
@@ -154,11 +147,7 @@ public final class FrameCodec {
                 cardFiles.add(file);
                 continue;
             }
-            boolean example = m.group(2) != null;
-            Private current = privates.get(m.group(1));
-            if (current == null || (current.example() && !example)) {
-                privates.put(m.group(1), new Private(CardCodec.parsePrivate(file.content()), example));
-            }
+            privates.put(m.group(1), CardCodec.parsePrivate(file.content()));
         }
 
         Map<String, TreeMap<Integer, List<Entry>>> byFrame = new TreeMap<>();
@@ -169,19 +158,19 @@ public final class FrameCodec {
                 errors.add(file.path() + ": path must be {frame}/step-{n}/{var-name}.md");
                 continue;
             }
-            CardCodec.Parsed parsed = CardCodec.parse(m.group(3), file.content(), scripts);
+            CardCodec.Parsed parsed = CardCodec.parse(m.group(3), file.content());
             if (!parsed.errors().isEmpty()) {
                 errors.add(file.path() + ": " + String.join("; ", parsed.errors()));
                 continue;
             }
             parsed.warnings().forEach(w -> errors.add(file.path() + ": " + w));
             String base = file.path().substring(0, file.path().length() - CardCodec.CARD_SUFFIX.length());
-            Private priv = privates.get(base);
+            String priv = privates.get(base);
             if (priv != null) {
                 claimed.add(base);
             }
             Card card = parsed.card()
-                    .withPrivateData(priv == null ? null : priv.body())
+                    .withPrivateData(priv)
                     .withLastRun(results.get(base));
             byFrame.computeIfAbsent(m.group(1), k -> new TreeMap<>())
                     .computeIfAbsent(Integer.parseInt(m.group(2)), k -> new ArrayList<>())

@@ -1,6 +1,6 @@
 -------------------
 -------------------
-echo-payload
-send-echo
-echo-result
-assert-echo
+product-payload
+create-product
+created-product
+assert-created-product

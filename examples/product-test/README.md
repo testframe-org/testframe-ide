@@ -7,7 +7,7 @@ The reference TestFrame suite: what a saved project looks like end to end.
 | Path | What it is |
 |---|---|
 | `testframe/frames/` | flow `active-products-echo`: `step-{n}/{var-file}.md`, one card per file |
-| `testframe/sources/` | where data comes from: mongo, swagger, restapi, assert, filter, mapper |
+| `testframe/sources/` | where data comes from, connection only: `mongo/products-db`, `openapi/product-api` (the product-api OpenAPI spec) |
 | `examples-components/product-api/` | Spring Boot 4 + MongoDB + Swagger - the business API under test |
 | `examples-components/product-web/` | Vite + React + TS catalog - UI consumer of the API |
 | `scripts/dev.ts` | component runner; ports from the repo-root `package.json > config` |
@@ -27,15 +27,19 @@ first time the collection is empty.
 
 ## The suite
 
-1. Step 1 runs the `mongo` script `getActiveProducts` (card `getActiveProducts`
-   references `sources/mongo/products-db/get-active-products.md`) and
-   publishes the result as the `getActiveProducts` variable.
-2. Step 2 binds `{{getActiveProducts.0.nome}}` into a payload, sends it to
-   the framework `POST /api/v2/echo`, and asserts the response with
-   the `assertions-core` script `assertEchoProcessed` (`assert status == "PROCESSADO"`),
-   executed live via `POST /api/v2/assertions`.
+1. Step 1 runs a `mongo` `find` card (`source: mongo/products-db`, `subtype: find`, JSON body
+   `{ "collection": "products", "filter": { "ativo": true } }`) and publishes the result as the
+   `getActiveProducts` variable; a `rawvalue`/`json` card and a `jsonassert`/`script` card follow.
+2. Step 2 binds `{{getActiveProducts.0.*}}` into a payload and sends it to the product-api
+   operation `create` (`POST /api/products`, picked from the `openapi/product-api` source's
+   cached spec); the copy is created inactive, so step 1 stays stable across runs. The response
+   feeds the `createdProduct` card and a `jsonassert`/`script` card checks it
+   (`assert createdProduct.categoria == getActiveProducts[0].categoria`).
 
-Regenerate the persisted frames/sources from the repo root:
+The openapi source's operations are cached in `testframe/sources/openapi/product-api.cache.md`
+(gitignored) when the source is saved in the Sources tab, or on first use.
+
+Regenerate the persisted frames from the repo root (sources are edited by hand or in the Sources tab):
 `bun run example:push`.
 
 Details per component: `examples-components/product-api/README.md`,

@@ -47,11 +47,11 @@ class RunEndpointIntegrationTest {
         Map<String, Object> response = post("/api/v2/run", Map.of(
                 "project", "integration", "frame", "echo-flow",
                 "steps", List.of(Map.of("number", 1, "cards", List.of(
-                        Map.of("varName", "payload", "title", "Payload", "sourceType", "inline",
+                        Map.of("varName", "payload", "title", "Payload", "sourceType", "rawvalue", "subtype", "json",
                                 "code", "{\"hello\": \"world\"}"),
-                        Map.of("varName", "send", "title", "Send", "sourceType", "restapi",
+                        Map.of("varName", "send", "title", "Send", "sourceType", "openapi", "subtype", "restapi",
                                 "endpoint", "POST /api/v2/echo", "code", ""),
-                        Map.of("varName", "check", "title", "Check", "sourceType", "assert",
+                        Map.of("varName", "check", "title", "Check", "sourceType", "jsonassert", "subtype", "script",
                                 "code", "assert send.status == \"PROCESSADO\""))))));
 
         List<Map<String, Object>> results = (List<Map<String, Object>>) response.get("results");
@@ -69,7 +69,7 @@ class RunEndpointIntegrationTest {
     void singleCardRunAnswersThroughTheSameEngine() throws Exception {
         Map<String, Object> response = post("/api/v2/run/card", Map.of(
                 "project", "integration", "step", 1,
-                "card", Map.of("varName", "solo", "title", "Solo", "sourceType", "restapi",
+                "card", Map.of("varName", "solo", "title", "Solo", "sourceType", "openapi", "subtype", "restapi",
                         "endpoint", "POST /api/v2/echo", "code", ""),
                 "vars", Map.of(), "payload", "{\"a\": 1}", "resultCard", Map.of("varName", "out", "code", "{}")));
 

@@ -9,12 +9,18 @@ import com.testframe.server.dto.RunFrameRequest;
 import com.testframe.server.dto.Step;
 import com.testframe.server.format.Catalog;
 import com.testframe.server.format.CodeRules;
+import com.testframe.server.format.JsonassertCode;
+import com.testframe.server.format.MongoQuery;
 import com.testframe.server.format.Names;
+import com.testframe.server.openapi.OpenApiService;
+import com.testframe.server.openapi.OpenApiSpec;
 import com.testframe.server.runner.Bindings;
 import com.testframe.server.runner.HttpRequestRunner;
-import com.testframe.server.runner.MongoScriptRunner;
+import com.testframe.server.runner.MongoRunner;
 import io.github.jsonassert.AssertionResult;
+import io.github.jsonassert.JsonassertParser;
 import io.github.jsonassert.JsonataAssertionService;
+import io.github.jsonassert.JsonataEvaluator;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -37,7 +43,7 @@ import java.util.regex.Pattern;
  * Server-side card runner (service layer phase 3): executes cards the way the editor's
  * {@code executeCard} did — {@code {{bindings}}}, in-flow HTTP requests (via
  * {@link HttpRequestRunner}, so no browser CORS applies), mongo scripts (reusing
- * {@link MongoScriptRunner}) and jsonassert validations (the Java engine) — publishing one
+ * {@link MongoRunner}) and jsonassert validations (the Java engine) — publishing one
  * variable per card and stopping at the first error card. The editor keeps only its
  * optimistic UI state and the result persistence.
  */
@@ -45,7 +51,6 @@ import java.util.regex.Pattern;
 public class RunService {
 
     private static final Pattern ENDPOINT = Pattern.compile("^(GET|POST|PUT|PATCH|DELETE)\\s+(\\S+)$", Pattern.CASE_INSENSITIVE);
-    private static final Pattern ASSERT_HEAD = Pattern.compile("^assert\\b", Pattern.CASE_INSENSITIVE);
     private static final String SIMULATED = "Simulated: this source type is not executed live yet.";
 
     private static final TypeReference<Object> ANY = new TypeReference<>() {
@@ -53,16 +58,18 @@ public class RunService {
     private static final TypeReference<Map<String, Object>> MAP = new TypeReference<>() {
     };
 
-    private final MongoScriptRunner mongo;
+    private final MongoRunner mongo;
     private final SourceService sources;
+    private final OpenApiService openApi;
     private final JsonataAssertionService assertions;
     private final HttpRequestRunner http;
     private final ObjectMapper json;
 
-    public RunService(MongoScriptRunner mongo, SourceService sources, JsonataAssertionService assertions,
-                      HttpRequestRunner http, ObjectMapper json) {
+    public RunService(MongoRunner mongo, SourceService sources, OpenApiService openApi,
+                      JsonataAssertionService assertions, HttpRequestRunner http, ObjectMapper json) {
         this.mongo = mongo;
         this.sources = sources;
+        this.openApi = openApi;
         this.assertions = assertions;
         this.http = http;
         this.json = json;
@@ -121,6 +128,13 @@ public class RunService {
                     if ("error".equals(result.status())) {
                         return new FrameRunResponse(request.project(), request.frame(), results, vars);
                     }
+                    if (isConditional(cards.get(i)) && Boolean.FALSE.equals(vars.get(varNameOf(cards.get(i))))) {
+                        // condition false: the rest of this step is skipped, the run goes on with the next step
+                        for (int k = i + 1; k < cards.size(); k++) {
+                            results.add(skipped(cards.get(k), step.number(), started));
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -169,35 +183,46 @@ public class RunService {
         String stepLabel = "[Step " + (stepNumber == null ? 1 : stepNumber) + "] ";
         String code = code(card);
         String sourceType = card.sourceType() == null ? "" : card.sourceType();
-        String type = Catalog.cardTypeOf(sourceType);
+        String subtype = card.subtype() == null ? "" : card.subtype();
+        String type = Catalog.cardTypeOf(sourceType, subtype);
         long timeout = Math.clamp(card.timeout() == null ? Catalog.defaultTimeout(type) : card.timeout(),
                 100, 120_000);
         // Forced failure only through an explicit marker in the code (kept from the editor)
         boolean shouldFail = code.toLowerCase(Locale.ROOT).contains("force_fail")
                 || code.toLowerCase(Locale.ROOT).contains("expect(false).tobe(true)");
 
-        // Code rules per source type (format/CodeRules): an invalid card never runs
-        String problem = CodeRules.problem(sourceType, code);
+        // Every card declares its (type, subtype), and the code rule of that pair
+        // (format/CodeRules) holds: an invalid card never runs
+        String kindProblem = Names.isBlank(sourceType) ? "the card has no type-source"
+                : Catalog.subtypeProblem(sourceType, subtype);
+        if (kindProblem != null) {
+            String message = Names.isBlank(sourceType) || Catalog.type(sourceType).isEmpty()
+                    ? kindProblem : "subtype " + kindProblem;
+            return result(varName, "error", stepLabel + title + ": " + message, message, started);
+        }
+        String problem = CodeRules.problem(sourceType, subtype, code);
         if (problem != null) {
             return result(varName, "error", stepLabel + title + ": " + sourceType + " " + problem, problem, started);
         }
 
-        if ("validation".equals(type) && ASSERT_HEAD.matcher(code.trim()).find()) {
-            return runAssertion(varName, stepLabel, title, code, shouldFail, vars, started);
+        if ("jsonassert".equals(sourceType)) {
+            return JsonassertCode.CONDITIONAL.equals(subtype)
+                    ? runConditional(varName, stepLabel, title, code, stepNumber, vars, started)
+                    : runScript(varName, stepLabel, title, code, shouldFail, vars, started);
         }
         if ("request".equals(type)) {
             String[] parts = endpointParts(card);
             if (parts != null) {
-                return runRequest(varName, stepLabel, title, parts, payloadCode, timeout, writeToResultCard,
-                        shouldFail, vars, serverBaseUrl, started);
+                return runRequest(varName, stepLabel, title, card, parts, payloadCode, timeout, writeToResultCard,
+                        shouldFail, vars, project, serverBaseUrl, started);
             }
             // No endpoint on a request card: nothing to execute, the card stays simulated
         } else if ("mongo".equals(sourceType)) {
-            return runMongo(varName, stepLabel, title, card, code, timeout, writeToResultCard, shouldFail,
+            return runMongo(varName, stepLabel, title, card, subtype, code, timeout, writeToResultCard, shouldFail,
                     vars, project, started);
         }
 
-        // JSON cards publish their (bound) body; simulated js/sql/jsonassert cards publish the
+        // JSON cards publish their (bound) body; simulated js/query/sql cards publish the
         // body of the JSON result card that follows them, like the editor did
         Object published = Bindings.NOT_FOUND;
         if (!shouldFail && "json".equals(type)) {
@@ -206,7 +231,7 @@ public class RunService {
             } catch (RuntimeException ignored) {
                 // contains unresolved templates: keep without publishing
             }
-        } else if (!shouldFail && List.of("js", "sql", "jsonassert").contains(type) && simulatedResultCode != null) {
+        } else if (!shouldFail && List.of("js", "query", "sql").contains(type) && simulatedResultCode != null) {
             try {
                 published = parse(simulatedResultCode);
             } catch (RuntimeException ignored) {
@@ -221,35 +246,142 @@ public class RunService {
                 stepLabel + title + ": " + (shouldFail ? "FAILED assertion" : "OK"), output, started);
     }
 
-    /** The live assertion card: the Java engine over every variable published so far. */
-    private CardResult runAssertion(String varName, String stepLabel, String title, String code,
-                                    boolean shouldFail, Map<String, Object> vars, long started) {
-        AssertionResult outcome;
-        try {
-            outcome = assertions.evaluate(code.trim(), new LinkedHashMap<>(vars));
-        } catch (RuntimeException e) {
-            // malformed expression or engine failure: the card reports the reason and stops the run
-            String message = String.valueOf(e.getMessage());
-            return result(varName, "error", stepLabel + title + ": assertion error: " + message, message, started);
+    /**
+     * A jsonassert {@code script} card: its statements run in order against every variable
+     * published so far. An {@code assert} line that fails fails the card (and stops the run);
+     * the value of the last plain expression is the card's variable (without one, the last
+     * assertion's outcome is).
+     */
+    private CardResult runScript(String varName, String stepLabel, String title, String code,
+                                 boolean shouldFail, Map<String, Object> vars, long started) {
+        Object published = null;
+        boolean hasValue = false;
+        String summary = "OK";
+        for (String statement : JsonassertCode.statements(code)) {
+            Map<String, Object> context = new LinkedHashMap<>(vars);
+            if (JsonassertCode.isAssert(statement)) {
+                AssertionResult outcome;
+                try {
+                    outcome = assertions.evaluate(statement, context);
+                } catch (RuntimeException e) {
+                    // malformed expression or engine failure: the card reports the reason and stops the run
+                    String message = String.valueOf(e.getMessage());
+                    return result(varName, "error", stepLabel + title + ": assertion error: " + message, message, started);
+                }
+                Map<String, Object> assertion = new LinkedHashMap<>();
+                assertion.put("passed", outcome.passed());
+                assertion.put("actual", outcome.actual());
+                assertion.put("expected", outcome.expected());
+                assertion.put("operator", outcome.operator());
+                assertion.put("jsonata", outcome.jsonata());
+                assertion.put("error", outcome.error());
+                summary = "assert " + (outcome.passed() ? "OK" : "FAILED assertion")
+                        + " (" + json.writeValueAsString(outcome.actual()) + " " + outcome.operator() + " "
+                        + json.writeValueAsString(outcome.expected()) + ")";
+                if (!hasValue) {
+                    published = assertion;
+                }
+                if (!outcome.passed()) {
+                    vars.put(varName, assertion);
+                    return result(varName, "error", stepLabel + title + ": " + summary, pretty(assertion), started);
+                }
+            } else {
+                try {
+                    published = evaluate(statement, context);
+                    hasValue = true;
+                } catch (RuntimeException e) {
+                    String message = String.valueOf(e.getMessage());
+                    return result(varName, "error", stepLabel + title + ": expression error: " + message, message, started);
+                }
+            }
         }
-        Map<String, Object> published = new LinkedHashMap<>();
-        published.put("passed", outcome.passed());
-        published.put("actual", outcome.actual());
-        published.put("expected", outcome.expected());
-        published.put("operator", outcome.operator());
-        published.put("jsonata", outcome.jsonata());
-        published.put("error", outcome.error());
         vars.put(varName, published);
-        String text = stepLabel + title + ": assert " + (outcome.passed() ? "OK" : "FAILED assertion")
-                + " (" + json.writeValueAsString(outcome.actual()) + " " + outcome.operator() + " "
-                + json.writeValueAsString(outcome.expected()) + ")";
-        return result(varName, outcome.passed() && !shouldFail ? "success" : "error", text, pretty(published), started);
+        return result(varName, shouldFail ? "error" : "success", stepLabel + title + ": " + (shouldFail ? "FAILED assertion" : summary),
+                pretty(published), started);
     }
 
-    /** The request card: an HTTP call executed by the framework server (no browser CORS). */
-    private CardResult runRequest(String varName, String stepLabel, String title, String[] parts, String payloadCode,
-                                  long timeout, BiConsumer<Object, String> writeToResultCard, boolean shouldFail,
-                                  Map<String, Object> vars, String serverBaseUrl, long started) {
+    /**
+     * A jsonassert {@code conditional} card: one boolean expression over the variables published
+     * so far, published as the card's variable. false skips the rest of the step (the frame run
+     * does it); a non-boolean result or an evaluation error is a card error.
+     */
+    private CardResult runConditional(String varName, String stepLabel, String title, String code, Integer stepNumber,
+                                      Map<String, Object> vars, long started) {
+        List<String> statements = JsonassertCode.statements(code);
+        if (statements.isEmpty()) {
+            String message = "the conditional has no expression";
+            return result(varName, "error", stepLabel + title + ": " + message, message, started);
+        }
+        Object value;
+        try {
+            value = evaluate(statements.getFirst(), new LinkedHashMap<>(vars));
+        } catch (RuntimeException e) {
+            String message = String.valueOf(e.getMessage());
+            return result(varName, "error", stepLabel + title + ": condition error: " + message, message, started);
+        }
+        if (!(value instanceof Boolean condition)) {
+            String message = "the condition must be boolean, got " + json.writeValueAsString(value);
+            return result(varName, "error", stepLabel + title + ": " + message, message, started);
+        }
+        vars.put(varName, condition);
+        String text = condition ? "condition true"
+                : "condition false: skipping rest of step " + (stepNumber == null ? 1 : stepNumber);
+        return result(varName, "success", stepLabel + title + ": " + text, String.valueOf(condition), started);
+    }
+
+    /** A bare jsonassert expression evaluated by the Java engine (parser + evaluator) against {@code context}. */
+    private static Object evaluate(String expression, Map<String, Object> context) {
+        return JsonataEvaluator.collapse(new JsonataEvaluator().evaluate(new JsonassertParser().parse(expression), context));
+    }
+
+    private static boolean isConditional(Card card) {
+        return "jsonassert".equals(card.sourceType()) && JsonassertCode.CONDITIONAL.equals(card.subtype());
+    }
+
+    private static CardResult skipped(Card card, Integer stepNumber, long started) {
+        String varName = varNameOf(card);
+        String title = Names.isBlank(card.title()) ? varName : Names.trim(card.title());
+        return result(varName, "skipped", "[Step " + (stepNumber == null ? 1 : stepNumber) + "] " + title
+                + ": skipped (condition false)", "", started);
+    }
+
+    /**
+     * The request card: an HTTP call executed by the framework server (no browser CORS). A card
+     * naming an openapi source goes to the base URL of that source's spec; a card without
+     * name-source sends relative paths to the framework server itself.
+     */
+    private CardResult runRequest(String varName, String stepLabel, String title, Card card, String[] parts,
+                                  String payloadCode, long timeout, BiConsumer<Object, String> writeToResultCard,
+                                  boolean shouldFail, Map<String, Object> vars, String project, String serverBaseUrl,
+                                  long started) {
+        String url;
+        String method = parts[0];
+        if (Names.isBlank(card.sourceName()) || parts[1].matches("(?i)^https?://.*")) {
+            url = HttpRequestRunner.resolveUrl(serverBaseUrl, parts[1]);
+        } else {
+            try {
+                OpenApiSpec spec = openApi.spec(project, card.sourceName());
+                String path = parts[1];
+                if (!Names.isBlank(card.openapiId())) {
+                    // the operationId is the identity: follow it when the spec moved the path
+                    OpenApiSpec.Operation op = spec.byId(card.openapiId()).orElse(null);
+                    if (op == null) {
+                        String message = "openapi-id \"" + card.openapiId() + "\" is not an operation of the openapi/"
+                                + card.sourceName() + " spec";
+                        return result(varName, "error", stepLabel + title + ": " + message, message, started);
+                    }
+                    method = op.method();
+                    path = op.path();
+                }
+                url = spec.urlOf(path);
+            } catch (ResponseStatusException e) {
+                String message = e.getStatusCode().value() + " " + e.getReason();
+                return result(varName, "error", stepLabel + title + ": " + message, message, started);
+            } catch (IOException | RuntimeException e) {
+                String message = e.getClass().getSimpleName() + ": " + e.getMessage();
+                return result(varName, "error", stepLabel + title + ": " + message, message, started);
+            }
+        }
         String bodyJson = null;
         if (payloadCode != null) {
             try {
@@ -259,8 +391,7 @@ public class RunService {
                 bodyJson = null; // unparsable payload: the request runs without body
             }
         }
-        HttpRequestRunner.Response res = http.run(parts[0],
-                HttpRequestRunner.resolveUrl(serverBaseUrl, parts[1]), bodyJson, timeout);
+        HttpRequestRunner.Response res = http.run(method, url, bodyJson, timeout);
         String text = stepLabel + title + ": " + (res.status() == 0 ? res.body() : "HTTP " + res.status())
                 + " (" + res.ms() + "ms)";
         Object published;
@@ -277,19 +408,23 @@ public class RunService {
         return result(varName, res.ok() && !shouldFail ? "success" : "error", text, res.body(), started);
     }
 
-    /** The mongo card: the saved read-only script, executed by the shared MongoScriptRunner. */
-    private CardResult runMongo(String varName, String stepLabel, String title, Card card, String code, long timeout,
-                                BiConsumer<Object, String> writeToResultCard, boolean shouldFail,
+    /**
+     * The mongo card: its JSON body (find or aggregation, by subtype) with {@code {{bindings}}}
+     * resolved, validated read-only before connecting, executed by the shared MongoRunner.
+     */
+    private CardResult runMongo(String varName, String stepLabel, String title, Card card, String subtype, String code,
+                                long timeout, BiConsumer<Object, String> writeToResultCard, boolean shouldFail,
                                 Map<String, Object> vars, String project, long started) {
-        String script = Bindings.substituteToString(code, vars, json);
         if (Names.isBlank(card.sourceName())) {
             String message = "the card has no mongo source (its saved sources/mongo/{name}.md holds the base-url)";
             return result(varName, "error", stepLabel + title + ": mongo " + message, message, started);
         }
         long began = System.nanoTime();
         try {
+            MongoQuery query = MongoQuery.parse(subtype,
+                    json.writeValueAsString(Bindings.substitute(parse(code), vars, json)));
             String uri = sources.baseUrl(project, "mongo", card.sourceName());
-            Map<String, Object> envelope = json.readValue(mongo.run(uri, script, timeout), MAP);
+            Map<String, Object> envelope = json.readValue(mongo.run(uri, query, timeout), MAP);
             Object value = envelope.get("result");
             vars.put(varName, value);
             writeToResultCard.accept(value, pretty(value));
@@ -343,7 +478,7 @@ public class RunService {
     }
 
     private static boolean isJsonCard(Card card) {
-        return "json".equals(Catalog.cardTypeOf(card.sourceType() == null ? "" : card.sourceType()));
+        return "json".equals(Catalog.cardTypeOf(card.sourceType(), card.subtype()));
     }
 
     private static String varNameOf(Card card) {

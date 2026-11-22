@@ -1,5 +1,7 @@
 -------------------
 title: Active products
+source: rawvalue
+subtype: json
 timeout: 2000
 -------------------
 ```json

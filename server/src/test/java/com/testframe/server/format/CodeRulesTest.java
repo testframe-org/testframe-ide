@@ -4,59 +4,72 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CodeRulesTest {
 
     @Test
-    void mongoAcceptsOneReadShellCall() {
-        assertNull(CodeRules.problem("mongo", "db.products.find({ ativo: true })"));
-        assertNull(CodeRules.problem("mongo", "db.products.find({ ativo: true }).limit(5)"));
-        assertNull(CodeRules.problem("mongo", "db.products.aggregate([{ $match: { ativo: true } }])"));
-        assertNull(CodeRules.problem("mongo", "// comment\n db.x.distinct('campo')\n"));
-        assertNull(CodeRules.problem("mongo", ""));
-        assertNull(CodeRules.problem("mongo", null));
+    void mongoBodiesFollowTheCardSubtype() {
+        String find = "{\"collection\": \"products\", \"filter\": {\"ativo\": true}, \"limit\": 5}";
+        String aggregation = "{\"collection\": \"products\", \"pipeline\": [{\"$match\": {\"ativo\": true}}]}";
+        assertNull(CodeRules.problem("mongo", "find", find));
+        assertNull(CodeRules.problem("mongo", "aggregation", aggregation));
+        assertNull(CodeRules.problem("mongo", "find", ""));
+        assertNull(CodeRules.problem("mongo", "aggregation", null));
+        assertEquals("unknown key \"pipeline\" (find accepts collection, filter, projection, sort, limit, skip)",
+                CodeRules.problem("mongo", "find", aggregation));
+        assertEquals("unknown key \"filter\" (aggregation accepts collection, pipeline)",
+                CodeRules.problem("mongo", "aggregation", find));
     }
 
     @Test
-    void mongoRejectsWritesOtherShapesAndMultipleCalls() {
-        assertEquals("mongo cards accept one mongo shell call, e.g. db.products.find({ ativo: true })",
-                CodeRules.problem("mongo", "const p = await db.collection(\"products\").find().toArray();"));
-        assertEquals("mongo operation \"deleteMany\" is not allowed (find, findOne, aggregate, countDocuments, distinct)",
-                CodeRules.problem("mongo", "db.products.deleteMany({})"));
-        assertEquals("unbalanced brackets or quotes",
-                CodeRules.problem("mongo", "db.products.find({ ativo: true "));
-        assertEquals("the mongo call must end with \")\"",
-                CodeRules.problem("mongo", "db.products.find({ a: 1 }) [0]"));
-        assertEquals("only one mongo call is allowed",
-                CodeRules.problem("mongo", "db.a.find(); db.b.find()"));
+    void mongoWithoutSubtypeHasNoRuleYet() {
+        // the missing subtype itself is reported by the card/script validation
+        assertNull(CodeRules.problem("mongo", null, "db.x.find()"));
+        assertEquals("write stage \"$out\" is not allowed (mongo cards are read-only)",
+                CodeRules.problem("mongo", "aggregation", "{\"collection\": \"x\", \"pipeline\": [{\"$out\": \"y\"}]}"));
     }
 
     @Test
     void oracleAcceptsOneSelectOnly() {
-        assertNull(CodeRules.problem("oracle", "SELECT * FROM products WHERE ativo = 1"));
-        assertNull(CodeRules.problem("oracle", "-- ok\nselect 1 from dual;"));
-        assertNull(CodeRules.problem("oracle", ""));
+        assertNull(CodeRules.problem("sql", "oracle", "SELECT * FROM products WHERE ativo = 1"));
+        assertNull(CodeRules.problem("sql", "oracle", "-- ok\nselect 1 from dual;"));
+        assertNull(CodeRules.problem("sql", "oracle", ""));
         assertEquals("oracle cards accept a single SELECT statement",
-                CodeRules.problem("oracle", "DELETE FROM products"));
+                CodeRules.problem("sql", "oracle", "DELETE FROM products"));
         assertEquals("only one SELECT statement is allowed",
-                CodeRules.problem("oracle", "SELECT 1 FROM dual; DROP TABLE products"));
-        assertNull(CodeRules.problem("oracle", "SELECT ';' AS sep FROM dual"), "semicolons inside strings do not split");
+                CodeRules.problem("sql", "oracle", "SELECT 1 FROM dual; DROP TABLE products"));
+        assertNull(CodeRules.problem("sql", "oracle", "SELECT ';' AS sep FROM dual"), "semicolons inside strings do not split");
+        assertNull(CodeRules.problem("sql", "postgres", "DELETE FROM products"), "only oracle has a rule");
     }
 
     @Test
-    void assertAcceptsOnlyJsonassertLines() {
-        assertNull(CodeRules.problem("assert", "assert $count(activeProducts) > 0\nassert status == \"PROCESSADO\""));
-        assertNull(CodeRules.problem("assert", "// draft"));
-        assertNull(CodeRules.problem("assert", ""));
-        assertEquals("not a jsonassert line: expect(res.status).toBe(200);",
-                CodeRules.problem("assert", "expect(res.status).toBe(200);"));
+    void scriptLinesAreAssertsOrExpressions() {
+        assertNull(CodeRules.problem("jsonassert", "script", "assert $count(activeProducts) > 0\nassert status == \"PROCESSADO\""));
+        assertNull(CodeRules.problem("jsonassert", "script", "// filter, then map\nitems[price > 10].name"));
+        assertNull(CodeRules.problem("jsonassert", "script", "// draft"));
+        assertNull(CodeRules.problem("jsonassert", "script", ""));
+        assertTrue(CodeRules.problem("jsonassert", "script", "assert $count(items) > 0\nexpect(res.status).toBe(200);")
+                .startsWith("not a jsonassert expression: expect(res.status).toBe(200);"));
+        assertTrue(CodeRules.problem("jsonassert", "script", "assert items")
+                .startsWith("not a jsonassert assert line: assert items"));
     }
 
     @Test
-    void typesWithoutRulesAcceptAnything() {
-        assertNull(CodeRules.problem("restapi", "{ \"a\": 1 }"));
-        assertNull(CodeRules.problem("filter", "$[price > 10]"));
-        assertNull(CodeRules.problem("inline", "not even close"));
-        assertNull(CodeRules.problem(null, "x"));
+    void conditionalIsExactlyOneBareExpression() {
+        assertNull(CodeRules.problem("jsonassert", "conditional", "$count(activeProducts) > 0"));
+        assertNull(CodeRules.problem("jsonassert", "conditional", "// only when there are products\n$count(activeProducts) > 0"));
+        assertEquals("a conditional holds exactly one boolean expression",
+                CodeRules.problem("jsonassert", "conditional", "a > 1\nb > 2"));
+        assertEquals("a conditional is a bare boolean expression (no assert): assert a > 1",
+                CodeRules.problem("jsonassert", "conditional", "assert a > 1"));
+        assertTrue(CodeRules.problem("jsonassert", "conditional", "a >").startsWith("not a jsonassert expression: a >"));
+    }
+
+    @Test
+    void kindsWithoutRulesAcceptAnything() {
+        assertNull(CodeRules.problem("openapi", "restapi", "{ \"a\": 1 }"));
+        assertNull(CodeRules.problem("rawvalue", "json", "not even close"));
+        assertNull(CodeRules.problem(null, null, "x"));
     }
 }

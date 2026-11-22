@@ -9,11 +9,12 @@ import { z } from 'zod';
 
 // --- Editor model ---
 
-// Derived from the source type (cardTypeOf), never stored: each family has its own type
-export const cardTypeSchema = z.enum(['request', 'js', 'sql', 'jsonassert', 'json', 'validation']);
+// Derived from (type-source, subtype) (cardKindOf), never stored: each family has its own type
+export const cardTypeSchema = z.enum(['request', 'query', 'js', 'sql', 'jsonassert', 'condition', 'json']);
 export type CardType = z.infer<typeof cardTypeSchema>;
 
-export const cardStatusSchema = z.enum(['idle', 'running', 'success', 'error']);
+// skipped: the card came after a false jsonassert conditional in its step
+export const cardStatusSchema = z.enum(['idle', 'running', 'success', 'error', 'skipped']);
 export type CardStatus = z.infer<typeof cardStatusSchema>;
 
 export const resizeDirectionSchema = z.enum(['right', 'bottom', 'corner']);
@@ -33,12 +34,13 @@ export const cardSchema = z.object({
   timeout: z.number(),
   status: cardStatusSchema,
   endpoint: z.string(),
+  openapiId: z.string().optional(), // openapi cards: the spec operation's operationId (the operation identity)
   code: z.string(),
-  sourceType: z.string(),
+  sourceType: z.string(), // type-source: every saved card declares one ('rawvalue' when it has no source)
+  subtype: z.string().optional(), // set when the type has subtypes (e.g. mongo: find | aggregation)
   sourceName: z.string(),
-  script: z.string().optional(), // camelCase name of a script of the card's source; empty body on disk = inherit it
   resultHeight: z.number().optional(), // px of the last-run panel under the script (absent = default)
-  privateData: z.string().optional(), // body of {var-file}.private.md (gitignored; falls back to .private.example.md)
+  privateData: z.string().optional(), // body of {var-file}.private.md (gitignored; absent file = none)
   httpMethod: z.string()
 });
 export type Card = z.infer<typeof cardSchema>;
@@ -82,31 +84,26 @@ export const selectedContextSchema = z.object({
 export type SelectedContext = z.infer<typeof selectedContextSchema>;
 
 // --- Wire shapes of GET/POST /api/v2/sources ---
-export const sourceScriptSchema = z.object({
-  name: z.string(), // camelCase, e.g. getActiveProducts -> scripts/get-active-products.md
-  body: z.string() // the query/code itself
-});
-export type SourceScript = z.infer<typeof sourceScriptSchema>;
-
+// A source is only its connection: sources/{typeSource}/{name}.md holds base-url and nothing
+// else, {name}.private.md the private data (gitignored). Card code always lives in the card.
 export const sourceDefSchema = z.object({
   typeSource: z.string(),
   name: z.string(),
-  baseUrl: z.string().optional(),
-  publicData: z.string(),
-  privateData: z.string(),
-  scripts: z.array(sourceScriptSchema).optional() // custom queries; swagger sources rely on the spec instead
+  baseUrl: z.string().nullish(),
+  privateData: z.string()
 });
 export type SourceDef = z.infer<typeof sourceDefSchema>;
 
 export const sourcesLoadResponseSchema = z.object({
-  sources: z.array(sourceDefSchema)
+  sources: z.array(sourceDefSchema),
+  errors: z.array(z.string()) // invalid source files (skipped)
 });
 export type SourcesLoadResponse = z.infer<typeof sourcesLoadResponseSchema>;
 
 // --- Wire shapes of GET/POST /api/v2/frames (the server owns the .md format) ---
 // type and httpMethod are derived by the server (ignored on save), as are step numbers
 // (positions); the card sequence in a step comes from its flow.md. lastRun is the card's
-// {var-file}.result-data.md.
+// {var-file}.cache.md.
 export const cardRunDataSchema = z.object({
   status: cardStatusSchema,
   text: z.string(),
@@ -121,9 +118,10 @@ export const cardDataSchema = z.object({
   title: z.string(),
   type: z.string(),
   sourceType: z.string(),
+  subtype: z.string().nullish(),
   sourceName: z.string(),
-  script: z.string().nullish(),
   endpoint: z.string(),
+  openapiId: z.string().nullish(),
   httpMethod: z.string(),
   timeout: z.number().nullish(),
   width: z.number().nullish(),
@@ -157,26 +155,41 @@ export type FramesLoadResponse = z.infer<typeof framesLoadResponseSchema>;
 export const framesSaveResponseSchema = z.object({
   project: z.string(),
   root: z.string(),
-  saved: z.number()
+  saved: z.number(),
+  warnings: z.array(z.string()).optional() // sources save: openapi specs that could not be cached
 });
 export type FramesSaveResponse = z.infer<typeof framesSaveResponseSchema>;
 
 // --- GET /api/v2/catalog: the server owns the domain definitions ---
-export const catalogEntrySchema = z.object({
-  name: z.string(),
+// The editor form of a card kind (server-defined, see format/Catalog)
+export const formKindSchema = z.enum(['request', 'swagger', 'mongo', 'query', 'script', 'condition', 'json', 'code']);
+export type FormKind = z.infer<typeof formKindSchema>;
+
+// One card kind of a type: subtype is null for types without subtypes
+export const cardKindSchema = z.object({
+  subtype: z.string().nullable(),
   cardType: cardTypeSchema,
   language: z.string(),
-  hasScripts: z.boolean(),
+  form: formKindSchema,
   defaultWidth: z.number(),
   defaultHeight: z.number(),
   defaultTimeout: z.number()
+});
+export type CardKind = z.infer<typeof cardKindSchema>;
+
+// A source type: hasSources = cards name a source (false for rawvalue, jsonassert)
+export const catalogEntrySchema = z.object({
+  name: z.string(),
+  language: z.string(),
+  hasSources: z.boolean(),
+  subtypes: z.array(z.string()),
+  cards: z.array(cardKindSchema)
 });
 export type CatalogEntry = z.infer<typeof catalogEntrySchema>;
 
 export const catalogResponseSchema = z.object({
   sourceTypes: z.array(catalogEntrySchema),
-  httpMethods: z.array(z.string()),
-  mongoOps: z.array(z.string())
+  httpMethods: z.array(z.string())
 });
 export type CatalogResponse = z.infer<typeof catalogResponseSchema>;
 
@@ -197,7 +210,24 @@ export const projectSummarySchema = z.object({
 });
 export type ProjectSummary = z.infer<typeof projectSummarySchema>;
 
-// POST /api/v2/validate: the server's code rule for a source type (null = acceptable)
+// --- GET /api/v2/sources/openapi/{name}/operations: the cached operations of an openapi source ---
+export const openApiOperationSchema = z.object({
+  operationId: z.string(),
+  method: z.string(),
+  path: z.string(),
+  summary: z.string()
+});
+export type OpenApiOperation = z.infer<typeof openApiOperationSchema>;
+
+export const openApiSpecSchema = z.object({
+  specUrl: z.string(),
+  baseUrl: z.string(), // the API base requests go to
+  fetchedAt: z.string(),
+  operations: z.array(openApiOperationSchema)
+});
+export type OpenApiSpec = z.infer<typeof openApiSpecSchema>;
+
+// POST /api/v2/validate: the server's code rule for a (type, subtype) (null = acceptable)
 export const validateResponseSchema = z.object({
   problem: z.string().nullish()
 });
@@ -208,7 +238,7 @@ export type ValidateResponse = z.infer<typeof validateResponseSchema>;
 // JSON result card that received a response), and `vars` carries every published variable.
 export const cardRunOutcomeSchema = z.object({
   varName: z.string(),
-  status: z.enum(['success', 'error']),
+  status: z.enum(['success', 'error', 'skipped']),
   text: z.string(),
   output: z.string(),
   at: z.string(),

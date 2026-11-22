@@ -39,11 +39,11 @@ final class ExampleProject {
     }
 
     /**
-     * Gitignored files a running editor leaves next to the committed ones (last
-     * run results, filled-in private data): never part of the reference project.
+     * Gitignored files a running editor leaves next to the committed ones ({@code *.cache.md}:
+     * last runs and openapi caches; {@code *.private.md}): never part of the reference project.
      */
     private static boolean isLocalOnly(String fileName) {
-        return fileName.endsWith(CardCodec.RESULT_SUFFIX) || fileName.endsWith(".private.md");
+        return fileName.endsWith(CardCodec.CACHE_SUFFIX) || fileName.endsWith(".private.md");
     }
 
     private static String read(Path p) {
@@ -52,13 +52,5 @@ final class ExampleProject {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-    }
-
-    /** The committed file a written path stands for: a written .private.md ships as .private.example.md. */
-    static String committedPathOf(String writtenPath, List<ProjectFile> committed) {
-        boolean exists = committed.stream().anyMatch(f -> f.path().equals(writtenPath));
-        return exists || !writtenPath.endsWith(".private.md")
-                ? writtenPath
-                : writtenPath.replaceFirst("\\.private\\.md$", ".private.example.md");
     }
 }

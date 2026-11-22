@@ -7,8 +7,9 @@ import com.testframe.server.dto.RunCardRequest;
 import com.testframe.server.dto.RunFrameRequest;
 import com.testframe.server.dto.Source;
 import com.testframe.server.dto.Step;
+import com.testframe.server.openapi.OpenApiService;
 import com.testframe.server.runner.HttpRequestRunner;
-import com.testframe.server.runner.MongoScriptRunner;
+import com.testframe.server.runner.MongoRunner;
 import com.testframe.server.store.ProjectFileStore;
 import com.sun.net.httpserver.HttpServer;
 import io.github.jsonassert.JsonataAssertionService;
@@ -22,6 +23,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -48,29 +50,38 @@ class RunServiceTest {
     private String echoBase;
 
     private static Card card(String varName, String sourceType, String code) {
-        return new Card(varName, varName, null, sourceType, "", null, "", null,
+        return new Card(varName, varName, null, sourceType, "rawvalue".equals(sourceType) ? "json" : null, "", "", null, null,
                 null, null, null, null, code, null, null);
     }
 
     private static Card request(String varName, String endpoint) {
-        return new Card(varName, varName, null, "restapi", "", null, endpoint, null,
+        return new Card(varName, varName, null, "openapi", "restapi", "", endpoint, null, null,
                 null, null, null, null, "", null, null);
     }
 
+    private static Card conditional(String varName, String code) {
+        return assertCard(varName, code).withSubtype("conditional");
+    }
+
     private static Card assertCard(String varName, String code) {
-        return new Card(varName, varName, null, "assert", "rules", null, "", null,
+        return new Card(varName, varName, null, "jsonassert", "script", "", "", null, null,
                 null, null, null, null, code, null, null);
     }
 
     private static Card mongoCard(String varName, String sourceName, String code) {
-        return new Card(varName, varName, null, "mongo", sourceName, null, "", null,
+        return new Card(varName, varName, null, "mongo", "find", sourceName, "", null, null,
                 null, null, null, null, code, null, null);
     }
 
     @BeforeEach
     void startEchoServer() throws IOException {
         sources = new SourceService(new ProjectFileStore(root.toString()));
-        runs = new RunService(new MongoScriptRunner(), sources, new JsonataAssertionService(),
+        // the openapi spec "served" for every source: its servers[0] is the in-test echo server
+        OpenApiService openApi = new OpenApiService(sources, url -> """
+                {"openapi": "3.0.1", "servers": [{"url": "%s"}],
+                 "paths": {"/api/v2/echo": {"post": {"operationId": "echo", "summary": "Echo"}}}}
+                """.formatted(echoBase));
+        runs = new RunService(new MongoRunner(), sources, openApi, new JsonataAssertionService(),
                 new HttpRequestRunner(HttpClient.newHttpClient()), JsonMapper.builder().build());
         echoServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         echoServer.createContext("/api/v2/echo", exchange -> {
@@ -103,8 +114,8 @@ class RunServiceTest {
     @Test
     void jsonCardsPublishBindingsForLaterCards() {
         FrameRunResponse r = run(new Step(1, List.of(
-                card("seed", "inline", "{\"a\": {\"b\": 7}}"),
-                card("copy", "inline", "{\"x\": \"{{seed.a.b}}\", \"kept\": \"{{missing.path}}\"}"))));
+                card("seed", "rawvalue", "{\"a\": {\"b\": 7}}"),
+                card("copy", "rawvalue", "{\"x\": \"{{seed.a.b}}\", \"kept\": \"{{missing.path}}\"}"))));
 
         assertEquals(List.of("success", "success"), r.results().stream().map(CardResult::status).toList());
         assertEquals("[Step 1] copy: OK", r.results().get(1).text());
@@ -116,10 +127,10 @@ class RunServiceTest {
     @Test
     void requestCardRunsHttpPublishesAndFeedsTheNextJsonCard() {
         FrameRunResponse r = run(new Step(1, List.of(
-                card("seed", "inline", "{\"n\": 2}"),
-                card("payload", "inline", "{\"v\": \"{{seed.n}}\"}"),
+                card("seed", "rawvalue", "{\"n\": 2}"),
+                card("payload", "rawvalue", "{\"v\": \"{{seed.n}}\"}"),
                 request("send", "POST /api/v2/echo"),
-                card("out", "inline", "{}"),
+                card("out", "rawvalue", "{}"),
                 assertCard("check", "assert send.echo.v == 2"))));
 
         assertEquals(List.of("success", "success", "success", "success", "success"),
@@ -132,6 +143,28 @@ class RunServiceTest {
         assertTrue(out.code().contains("PROCESSADO"));
         assertEquals("PROCESSADO", asMap(r.vars().get("out")).get("status"));
         assertTrue((Boolean) asMap(r.vars().get("check")).get("passed"));
+    }
+
+    @Test
+    void openapiCardsGoToTheBaseOfTheirSourceSpec() throws IOException {
+        sources.save("demo", List.of(new Source("openapi", "echo-api", "http://spec.invalid/openapi.json", "")));
+        FrameRunResponse r = runs.runFrame(new RunFrameRequest("demo", "flow", List.of(new Step(1, List.of(
+                request("send", "POST /api/v2/echo").withSourceName("echo-api"))))), "http://framework.invalid");
+        assertEquals("success", r.results().getFirst().status(), r.results().getFirst().text());
+        assertTrue(Files.exists(root.resolve("demo/testframe/sources/openapi/echo-api.cache.md")), "the spec was cached");
+
+        // the operationId is the identity: a stale endpoint follows the spec's operation
+        FrameRunResponse moved = runs.runFrame(new RunFrameRequest("demo", "flow", List.of(new Step(1, List.of(
+                request("send", "POST /api/v1/old-echo").withSourceName("echo-api").withOpenapiId("echo"))))), "http://framework.invalid");
+        assertEquals("success", moved.results().getFirst().status(), moved.results().getFirst().text());
+        FrameRunResponse unknownId = run(new Step(1, List.of(
+                request("send", "POST /api/v2/echo").withSourceName("echo-api").withOpenapiId("gone"))));
+        assertEquals("error", unknownId.results().getFirst().status());
+        assertTrue(unknownId.results().getFirst().text().contains("openapi-id \"gone\""));
+
+        FrameRunResponse missing = run(new Step(1, List.of(request("send", "POST /api/v2/echo").withSourceName("nope"))));
+        assertEquals("error", missing.results().getFirst().status());
+        assertTrue(missing.results().getFirst().text().contains("404"), missing.results().getFirst().text());
     }
 
     @Test
@@ -148,7 +181,7 @@ class RunServiceTest {
         });
         FrameRunResponse r = run(new Step(1, List.of(
                 request("bad", "POST /boom"),
-                card("never", "inline", "{}"))));
+                card("never", "rawvalue", "{}"))));
 
         assertEquals(1, r.results().size(), "the run stops at the first error card");
         assertEquals("error", r.results().getFirst().status());
@@ -169,9 +202,9 @@ class RunServiceTest {
     @Test
     void assertCardOverPublishedVarsFailsAndStopsTheRun() {
         FrameRunResponse r = run(new Step(1, List.of(
-                card("seed", "inline", "{\"items\": [1, 2]}"),
+                card("seed", "rawvalue", "{\"items\": [1, 2]}"),
                 assertCard("check", "assert $count(items) == 5"),
-                card("never", "inline", "{}"))));
+                card("never", "rawvalue", "{}"))));
 
         assertEquals(2, r.results().size());
         assertEquals("error", r.results().get(1).status());
@@ -182,39 +215,40 @@ class RunServiceTest {
     @Test
     void invalidCodeFailsTheCardBeforeItRuns() {
         FrameRunResponse r = run(new Step(1, List.of(
-                mongoCard("wipe", "db", "db.x.deleteMany({})"),
-                card("never", "inline", "{}"))));
+                mongoCard("wipe", "db", "{\"collection\": \"x\", \"filter\": {}, \"remove\": true}"),
+                card("never", "rawvalue", "{}"))));
 
         assertEquals(1, r.results().size());
         assertEquals("error", r.results().getFirst().status());
-        assertTrue(r.results().getFirst().text().contains("deleteMany"));
-        assertTrue(r.results().getFirst().output().contains("not allowed"));
+        assertTrue(r.results().getFirst().text().contains("unknown key \"remove\""));
+        assertTrue(r.results().getFirst().output().contains("find accepts"));
     }
 
     @Test
     void mongoCardsFailCleanlyWithoutSourceOrSavedFile() throws IOException {
-        FrameRunResponse noSource = run(new Step(1, List.of(mongoCard("q", "", "db.x.find()"))));
+        FrameRunResponse noSource = run(new Step(1, List.of(mongoCard("q", "", "{\"collection\": \"x\"}"))));
         assertEquals("error", noSource.results().getFirst().status());
         assertTrue(noSource.results().getFirst().text().contains("no mongo source"));
 
-        FrameRunResponse missingFile = run(new Step(1, List.of(mongoCard("q", "db", "db.x.find()"))));
+        FrameRunResponse missingFile = run(new Step(1, List.of(mongoCard("q", "db", "{\"collection\": \"x\"}"))));
         assertEquals("error", missingFile.results().getFirst().status(),
                 "the connection comes from the saved source file only");
         assertTrue(missingFile.results().getFirst().text().contains("not found"),
                 missingFile.results().getFirst().text());
 
         // with a saved source, the read-only rules still apply before anything connects
-        sources.save("demo", List.of(new Source("mongo", "db", "mongodb://127.0.0.1:1/demo", "", "", List.of())));
-        FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "db.x.deleteMany({})"))));
+        sources.save("demo", List.of(new Source("mongo", "db", "mongodb://127.0.0.1:1/demo", "")));
+        FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "{\"collection\": \"x\"}")
+                .withSubtype("aggregation").withCode("{\"collection\": \"x\", \"pipeline\": [{\"$out\": \"y\"}]}"))));
         assertEquals("error", write.results().getFirst().status());
-        assertTrue(write.results().getFirst().text().contains("deleteMany"));
+        assertTrue(write.results().getFirst().text().contains("$out"), write.results().getFirst().text());
     }
 
     @Test
     void unreachableMongoIsReportedClearlyOnTheCard() throws IOException {
         // the source saves fine; the database behind its base-url simply is not there
-        sources.save("demo", List.of(new Source("mongo", "down", "mongodb://127.0.0.1:1/demo", "", "", List.of())));
-        FrameRunResponse r = run(new Step(1, List.of(mongoCard("q", "down", "db.x.find()"))));
+        sources.save("demo", List.of(new Source("mongo", "down", "mongodb://127.0.0.1:1/demo", "")));
+        FrameRunResponse r = run(new Step(1, List.of(mongoCard("q", "down", "{\"collection\": \"x\"}"))));
         CardResult card = r.results().getFirst();
         assertEquals("error", card.status());
         // the driver names the real cause (socket open refused) on the card, and the run stops there
@@ -226,8 +260,8 @@ class RunServiceTest {
     void cardsRunInSentStepAndArrayOrder() {
         // the runner follows the sent order (the editor's flow order), not the step numbers
         FrameRunResponse r = run(
-                new Step(2, List.of(card("stepTwoB", "inline", "{}"), card("stepTwoA", "inline", "{}"))),
-                new Step(1, List.of(card("one", "inline", "{}"))));
+                new Step(2, List.of(card("stepTwoB", "rawvalue", "{}"), card("stepTwoA", "rawvalue", "{}"))),
+                new Step(1, List.of(card("one", "rawvalue", "{}"))));
         assertEquals(List.of("stepTwoB", "stepTwoA", "one"),
                 r.results().stream().map(CardResult::varName).toList());
     }
@@ -235,8 +269,8 @@ class RunServiceTest {
     @Test
     void simulatedCardsStaySuccessfulAndTheForceFailMarkerForcesAnError() {
         FrameRunResponse r = run(new Step(1, List.of(
-                card("plain", "inline", "not json"),
-                card("forced", "inline", "{\"force_fail\": 1}"))));
+                card("plain", "rawvalue", "not json"),
+                card("forced", "rawvalue", "{\"force_fail\": 1}"))));
 
         assertEquals("success", r.results().getFirst().status());
         assertTrue(r.results().getFirst().output().startsWith("Simulated"));
@@ -264,5 +298,48 @@ class RunServiceTest {
         assertEquals(5, asMap(asMap(r.vars().get("solo")).get("echo")).get("v"));
         assertNotNull(r.vars().get("out"), "the result card variable is published for the editor");
         assertEquals(5, asMap(asMap(r.vars().get("out")).get("echo")).get("v"));
+    }
+
+    @Test
+    void scriptCardsPublishTheirLastExpression() {
+        FrameRunResponse r = run(new Step(1, List.of(
+                card("seed", "rawvalue", "{\"items\": [{\"price\": 5, \"name\": \"a\"}, {\"price\": 50, \"name\": \"b\"}]}"),
+                assertCard("expensive", "assert $count(seed.items) == 2\n// filter + map\nseed.items[price > 10].name"))));
+        assertEquals(List.of("success", "success"), r.results().stream().map(CardResult::status).toList());
+        assertEquals("b", r.vars().get("expensive"), "the value of the last plain expression is the card's variable");
+    }
+
+    @Test
+    void falseConditionalSkipsTheRestOfTheStepAndTheRunGoesOn() {
+        FrameRunResponse r = run(
+                new Step(1, List.of(
+                        card("seed", "rawvalue", "{\"n\": 0}"),
+                        conditional("hasItems", "seed.n > 0"),
+                        card("never", "rawvalue", "{}"),
+                        assertCard("neverChecked", "assert 1 == 2"))),
+                new Step(2, List.of(card("next", "rawvalue", "{\"ok\": true}"))));
+        assertEquals(List.of("success", "success", "skipped", "skipped", "success"),
+                r.results().stream().map(CardResult::status).toList());
+        assertEquals("[Step 1] hasItems: condition false: skipping rest of step 1", r.results().get(1).text());
+        assertEquals(Boolean.FALSE, r.vars().get("hasItems"));
+        assertFalse(r.vars().containsKey("never"));
+        assertTrue(r.vars().containsKey("next"), "the next step runs");
+    }
+
+    @Test
+    void trueConditionalContinuesAndNonBooleanIsAnError() {
+        FrameRunResponse ok = run(new Step(1, List.of(
+                card("seed", "rawvalue", "{\"n\": 3}"),
+                conditional("hasItems", "seed.n > 0"),
+                card("after", "rawvalue", "{}"))));
+        assertEquals(List.of("success", "success", "success"), ok.results().stream().map(CardResult::status).toList());
+        assertEquals("[Step 1] hasItems: condition true", ok.results().get(1).text());
+
+        FrameRunResponse bad = run(new Step(1, List.of(
+                card("seed", "rawvalue", "{\"n\": 3}"),
+                conditional("notBool", "seed.n"),
+                card("after", "rawvalue", "{}"))));
+        assertEquals(List.of("success", "error"), bad.results().stream().map(CardResult::status).toList());
+        assertTrue(bad.results().get(1).text().contains("the condition must be boolean, got 3"), bad.results().get(1).text());
     }
 }

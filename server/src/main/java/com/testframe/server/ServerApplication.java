@@ -4,7 +4,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 // No implicit Mongo client: connections come only from the edited project's source files
-// (sources/mongo/{name}.md base-url), see runner/MongoScriptRunner.
+// (sources/mongo/{name}.md base-url), see runner/MongoRunner.
 @SpringBootApplication(excludeName = {
 		"org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration",
 		"org.springframework.boot.mongodb.autoconfigure.MongoReactiveAutoConfiguration",

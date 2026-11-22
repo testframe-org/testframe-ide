@@ -65,38 +65,31 @@ class ProjectFileStoreTest {
     }
 
     @Test
-    void privateExampleTemplatesAreNeverPruned() throws Exception {
+    void privateFilesArePrunedWithTheirCard() throws Exception {
         ProjectFileStore store = new ProjectFileStore(root.toString());
-        Path template = frames().resolve("main/step-1/a-card.private.example.md");
-        Files.createDirectories(template.getParent());
-        Files.writeString(template, "template");
-
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
                 new ProjectFile("main/step-1/a-card.md", "a"),
                 new ProjectFile("main/step-1/a-card.private.md", "secret")));
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of());
 
-        assertTrue(Files.exists(template), "versioned template survives a replace");
-        assertFalse(Files.exists(frames().resolve("main/step-1/a-card.private.md")));
+        assertFalse(Files.exists(frames().resolve("main/step-1/a-card.private.md")), "no template survives: there are none");
     }
 
     @Test
     void staleFilesOutsideScopesAreDeletedUnlessSent() throws Exception {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         Path sources = root.resolve("demo/testframe/sources");
-        store.replace("demo", "testframe/sources", List.of("mongo/db"), List.of(), List.of(
+        store.replace("demo", "testframe/sources", List.of(), List.of(), List.of(
                 new ProjectFile("mongo/db.md", "pub"),
-                new ProjectFile("mongo/db.private.md", "priv"),
-                new ProjectFile("mongo/db/get-all.md", "q")));
+                new ProjectFile("mongo/db.private.md", "priv")));
 
-        Map<String, Object> result = store.replace("demo", "testframe/sources", List.of("mongo/db"),
-                List.of("mongo/db.md", "mongo/db.private.md", "mongo/db.private.example.md"),
+        Map<String, Object> result = store.replace("demo", "testframe/sources", List.of(),
+                List.of("mongo/db.md", "mongo/db.private.md"),
                 List.of(new ProjectFile("mongo/db.md", "pub2")));
 
-        assertEquals(2, result.get("removed"));
+        assertEquals(1, result.get("removed"));
         assertEquals("pub2", Files.readString(sources.resolve("mongo/db.md")));
         assertFalse(Files.exists(sources.resolve("mongo/db.private.md")));
-        assertFalse(Files.exists(sources.resolve("mongo/db")), "scripts directory pruned when empty");
     }
 
     @Test
@@ -104,10 +97,9 @@ class ProjectFileStoreTest {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
                 new ProjectFile("main/step-1/a-card.md", "a")));
-        store.replace("demo", "testframe/sources", List.of("mongo/db"), List.of(), List.of(
+        store.replace("demo", "testframe/sources", List.of(), List.of(), List.of(
                 new ProjectFile("mongo/db.md", "pub"),
-                new ProjectFile("mongo/db.private.md", "priv"),
-                new ProjectFile("mongo/db/get-all.md", "q")));
+                new ProjectFile("mongo/db.private.md", "priv")));
         Files.createDirectories(root.resolve("not-a-project"));
 
         List<ProjectFileStore.ProjectSummary> projects = store.listProjects();
@@ -124,18 +116,18 @@ class ProjectFileStoreTest {
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
                 new ProjectFile("main/step-1/a-card.md", "a"),
                 new ProjectFile("main/step-1/b-card.md", "b")));
-        store.saveResult("demo", "main/step-1/a-card.result-data.md", "ok");
-        store.saveResult("demo", "main/step-1/b-card.result-data.md", "ok");
-        store.saveResult("demo", "main/step-1/b-card.result-data.md", "ok again");
-        assertThrows(ResponseStatusException.class, () -> store.saveResult("demo", "main/step-1/a-card.md", "x"));
+        store.saveCache("demo", "testframe/frames", "main/step-1/a-card.cache.md", "ok");
+        store.saveCache("demo", "testframe/frames", "main/step-1/b-card.cache.md", "ok");
+        store.saveCache("demo", "testframe/frames", "main/step-1/b-card.cache.md", "ok again");
+        assertThrows(ResponseStatusException.class, () -> store.saveCache("demo", "testframe/frames", "main/step-1/a-card.md", "x"));
 
         // saving the frame without b-card keeps a's result and drops b's
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
                 new ProjectFile("main/step-1/a-card.md", "a")));
 
-        assertTrue(Files.exists(frames().resolve("main/step-1/a-card.result-data.md")));
-        assertFalse(Files.exists(frames().resolve("main/step-1/b-card.result-data.md")));
+        assertTrue(Files.exists(frames().resolve("main/step-1/a-card.cache.md")));
+        assertFalse(Files.exists(frames().resolve("main/step-1/b-card.cache.md")));
         String gitignore = Files.readString(root.resolve("demo/testframe/.gitignore"));
-        assertEquals(1, gitignore.lines().filter("*.result-data.md"::equals).count());
+        assertEquals(1, gitignore.lines().filter("*.cache.md"::equals).count());
     }
 }

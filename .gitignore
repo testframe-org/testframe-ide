@@ -4,5 +4,5 @@ target/
 .crush/
 *.log
 
-# Private project data (versioned templates are *.private.example.md)
+# Private project data (next to its card or source, never versioned)
 *.private.md

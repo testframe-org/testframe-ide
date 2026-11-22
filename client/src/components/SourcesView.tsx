@@ -1,9 +1,9 @@
 import React from 'react';
-import { Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle, FileCode2 } from 'lucide-react';
+import { Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle } from 'lucide-react';
 import { ApiError, testframeApi } from '../client-api';
-import { SOURCE_TYPES, hasScripts } from '../catalog';
+import { sourceTypesWithSources } from '../catalog';
 import { useI18n } from '../i18n';
-import type { LogLevel, SourceDef, SourceScript } from '../client-api/testframe.z';
+import type { LogLevel, SourceDef } from '../client-api/testframe.z';
 
 interface SourcesViewProps {
   project: string;
@@ -13,8 +13,17 @@ interface SourcesViewProps {
 }
 
 // ============================================================================
-// SOURCES TAB: register and edit the project's sources (full-page view)
+// SOURCES TAB: register and edit the project's sources (full-page view). A source is only
+// its connection: {type}/{name}.md holds base-url, {name}.private.md the private data.
+// Types without named sources (rawvalue, jsonassert) are not offered: their cards hold the code.
 // ============================================================================
+
+// base-url placeholder per type (openapi: the OpenAPI spec JSON, whose operations the cards pick)
+const BASE_URL_PLACEHOLDER: Record<string, string> = {
+  openapi: 'http://localhost:18081/api/docs/openapi.json',
+  mongo: 'mongodb://localhost:27017/products',
+  sql: 'jdbc:postgresql://localhost:5432/app'
+};
 export function SourcesView({ project, sources, setSources, onLog }: SourcesViewProps) {
   const { t } = useI18n();
   const [selectedIndex, setSelectedIndex] = React.useState(0);
@@ -26,25 +35,11 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
   const updateCurrent = (updates: Partial<SourceDef>) =>
     setSources((prev) => prev.map((s, i) => (i === selectedIndex ? { ...s, ...updates } : s)));
 
-  const updateScript = (index: number, updates: Partial<SourceScript>) => {
-    const next = (current.scripts ?? []).map((s, i) => (i === index ? { ...s, ...updates } : s));
-    updateCurrent({ scripts: next });
-  };
-
-  const addScript = () => {
-    const next = [...(current.scripts ?? []), { name: `newScript${(current.scripts?.length ?? 0) + 1}`, body: '' }];
-    updateCurrent({ scripts: next });
-  };
-
-  const removeScript = (index: number) => {
-    updateCurrent({ scripts: (current.scripts ?? []).filter((_, i) => i !== index) });
-  };
-
   const addSource = () => {
     setSources((prev) => {
       const next = [
         ...prev,
-        { typeSource: 'restapi', name: `new-source-${prev.length + 1}`, publicData: '', privateData: '', scripts: [] }
+        { typeSource: sourceTypesWithSources()[0] ?? 'openapi', name: `new-source-${prev.length + 1}`, privateData: '' }
       ];
       setSelectedIndex(next.length - 1);
       return next;
@@ -65,6 +60,10 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
     try {
       const data = await testframeApi.saveSources(project, sources);
       onLog?.(t('savedSources', { n: data.saved, root: data.root }), 'success');
+      // openapi sources cache their operations on save; an unreachable spec is only a warning
+      const warnings = data.warnings ?? [];
+      warnings.forEach((w) => onLog?.(w, 'error'));
+      setErrors(warnings);
     } catch (err) {
       if (err instanceof ApiError && err.status === 400) setErrors(err.reason.split('; '));
       onLog?.(t('savedSourcesFail', { msg: (err as Error).message }), 'error');
@@ -76,6 +75,8 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
   const loadAll = async () => {
     try {
       const data = await testframeApi.loadSources(project);
+      setErrors(data.errors);
+      data.errors.forEach((e) => onLog?.(e, 'error'));
       if (data.sources?.length) {
         setSources(data.sources);
         setSelectedIndex(0);
@@ -157,7 +158,10 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
                   onChange={(e) => updateCurrent({ typeSource: e.target.value })}
                   className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
                 >
-                  {SOURCE_TYPES.map((type) => (
+                  {!sourceTypesWithSources().includes(current.typeSource) && (
+                    <option value={current.typeSource}>{current.typeSource} (?)</option>
+                  )}
+                  {sourceTypesWithSources().map((type) => (
                     <option key={type} value={type}>{type}</option>
                   ))}
                 </select>
@@ -185,31 +189,16 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
                   type="text"
                   value={current.baseUrl ?? ''}
                   onChange={(e) => updateCurrent({ baseUrl: e.target.value })}
-                  placeholder={
-                    current.typeSource === 'swagger'
-                      ? 'http://localhost:18081/api/docs/openapi.json'
-                      : 'mongodb://localhost:27017/products'
-                  }
+                  placeholder={BASE_URL_PLACEHOLDER[current.typeSource] ?? ''}
                   className="flex-1 min-w-0 text-xs font-mono text-slate-700 bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-blue-500"
                 />
               </label>
+              {current.typeSource === 'openapi' && (
+                <p className="mt-1 text-[11px] text-slate-400">{t('openapiSourceHint')}</p>
+              )}
             </div>
 
             <div className="flex-1 flex flex-col gap-3 p-4 min-h-0 overflow-y-auto">
-              <label className="flex flex-col gap-1 min-h-[120px]">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                  {current.name || '{name}'}.md{' '}
-                  <span className="normal-case font-normal text-slate-400">{t('publicDataDesc')}</span>
-                </span>
-                <textarea
-                  spellCheck={false}
-                  value={current.publicData}
-                  onChange={(e) => updateCurrent({ publicData: e.target.value })}
-                  placeholder={t('publicPlaceholder')}
-                  className="flex-1 min-h-[100px] resize-y bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-3 rounded-lg border border-slate-700 outline-none focus:border-blue-500/60"
-                />
-              </label>
-
               <label className="flex flex-col gap-1 min-h-[90px]">
                 <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
                   {current.name || '{name}'}.private.md{' '}
@@ -223,64 +212,6 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
                   className="flex-1 min-h-[70px] resize-y bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-3 rounded-lg border border-slate-700 outline-none focus:border-amber-500/60"
                 />
               </label>
-
-              {/* {name}/{script}.md — custom queries (swagger sources rely on the spec instead) */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
-                    <FileCode2 className="w-3.5 h-3.5 text-emerald-600" />
-                    scripts/
-                    <span className="normal-case font-normal text-slate-400 lowercase">{t('scriptsHint')}</span>
-                  </span>
-                  {hasScripts(current.typeSource) && (
-                    <button
-                      onClick={addScript}
-                      className="flex items-center gap-1 text-[10px] font-semibold text-blue-600 hover:text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 bg-blue-50/60"
-                    >
-                      <Plus className="w-3 h-3" />
-                      {t('addScript')}
-                    </button>
-                  )}
-                </div>
-
-                {!hasScripts(current.typeSource) && (
-                  <p className="text-[11px] text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-                    swagger: endpoints are defined 100% by the spec at base-url — no custom scripts needed.
-                  </p>
-                )}
-
-                {hasScripts(current.typeSource) && !(current.scripts?.length) && (
-                  <p className="text-[11px] text-slate-400">{t('noScripts')}</p>
-                )}
-
-                {hasScripts(current.typeSource) &&
-                  (current.scripts ?? []).map((script, i) => (
-                    <div key={i} className="rounded-lg border border-slate-200 bg-slate-50/60 p-2.5 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono text-slate-400">script-name</span>
-                        <input
-                          value={script.name}
-                          onChange={(e) => updateScript(i, { name: e.target.value })}
-                          className="flex-1 min-w-0 text-xs font-mono text-slate-800 bg-white border border-slate-200 rounded px-2 py-1 outline-none focus:border-blue-500"
-                        />
-                        <button
-                          onClick={() => removeScript(i)}
-                          title={t('removeScript')}
-                          className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                      <textarea
-                        spellCheck={false}
-                        value={script.body}
-                        onChange={(e) => updateScript(i, { body: e.target.value })}
-                        placeholder={'db.collection.find({ ... })'}
-                        className="w-full h-40 resize-y bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2.5 rounded border border-slate-700 outline-none focus:border-emerald-500/60"
-                      />
-                    </div>
-                  ))}
-              </div>
             </div>
 
             {errors.length > 0 && (

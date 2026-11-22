@@ -63,12 +63,6 @@ public final class Bindings {
         return input;
     }
 
-    /** The substituted text of a script body (mongo cards), never a structured value. */
-    public static String substituteToString(String text, Map<String, Object> vars, ObjectMapper json) {
-        Object value = substitute(text, vars, json);
-        return value instanceof String s ? s : encode(value, json);
-    }
-
     /** Follows a dot path through the published variables; {@link #NOT_FOUND} when nothing lives there. */
     static Object resolvePath(String path, Map<String, Object> vars) {
         String[] segments = path.split("\\.", -1);

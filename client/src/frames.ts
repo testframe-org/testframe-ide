@@ -2,15 +2,16 @@ import type { Card, CardData, CardRunResult, CardType, Frame, FrameData, FramesL
 import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT } from './catalog';
 
 // ============================================================================
-// The project format (.md files, frontmatter, file names, script inheritance,
-// what is stored) is owned by the framework server (server/.../format, spec:
+// The project format (.md files, frontmatter, file names, what is stored) is
+// owned by the framework server (server/.../format, spec:
 // modules/testframe-ide/docs/project-format.md). The domain definitions —
-// source types, card types, defaults, HTTP methods and the code rules per
-// source type — are served too (GET /api/v2/catalog, POST /api/v2/validate;
-// see catalog.ts). This module keeps the editor's in-memory model and the name
-// helpers used for live feedback (a mirror of the server's format/Names, the
-// server enforces them on save). Execution is a server concern since phase 3:
-// {{bindings}}, HTTP requests, mongo scripts and assertions run through
+// source types with their subtypes, card types, defaults, HTTP methods and the
+// code rules per (type, subtype) — are served too (GET /api/v2/catalog,
+// POST /api/v2/validate; see catalog.ts). This module keeps the editor's
+// in-memory model and the name helpers used for live feedback (a mirror of the
+// server's format/Names, the server enforces them on save). Execution is a
+// server concern since phase 3: {{bindings}}, HTTP requests, mongo queries and
+// assertions run through
 // POST /api/v2/run and POST /api/v2/run/card.
 // ============================================================================
 
@@ -70,10 +71,11 @@ const toCard = (frame: string, stepNumber: number, d: CardData): Card => ({
   timeout: d.timeout ?? DEFAULT_TIMEOUT[d.type as CardType],
   status: 'idle',
   endpoint: d.endpoint ?? '',
+  openapiId: d.openapiId ?? undefined,
   code: d.code ?? '',
-  sourceType: d.sourceType ?? 'inline',
+  sourceType: d.sourceType,
+  subtype: d.subtype ?? undefined,
   sourceName: d.sourceName ?? '',
-  script: d.script ?? undefined,
   resultHeight: d.resultHeight ?? undefined,
   privateData: d.privateData ?? undefined,
   httpMethod: d.httpMethod ?? ''
@@ -103,14 +105,17 @@ export const framesFromApi = (
 };
 
 // One card for the frame API and the runner (POST /api/v2/frames, /api/v2/run, /api/v2/run/card).
+// Every card is sent with its type-source (the server rejects a card without one) and its
+// subtype when the type has subtypes.
 export const cardToApi = (card: Card): CardData => ({
   varName: cardVarName(card),
   title: card.title,
   type: card.type,
   sourceType: card.sourceType,
+  subtype: card.subtype ?? null,
   sourceName: card.sourceName,
-  script: card.script ?? null,
   endpoint: card.endpoint,
+  openapiId: card.openapiId ?? null,
   httpMethod: card.httpMethod,
   timeout: card.timeout,
   width: card.width,
@@ -122,8 +127,7 @@ export const cardToApi = (card: Card): CardData => ({
 });
 
 // One frame for POST /api/v2/frames: the server numbers steps by position, stores the card
-// sequence in the step's flow.md, validates var-names, the frontmatter and the code rules,
-// and stores inherited script bodies empty.
+// sequence in the step's flow.md and validates var-names, the frontmatter and the code rules.
 export const frameToApi = (name: string, steps: Step[]): FrameData => ({
   name,
   steps: steps.map((step, idx) => ({

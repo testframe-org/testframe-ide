@@ -15,18 +15,19 @@ import java.util.regex.Pattern;
 
 /**
  * One card file ({@code frames/{frame}/step-{n}/{var-file}.md}) and its siblings:
- * {@code {var-file}.private.md} (private data) and {@code {var-file}.result-data.md} (last run).
+ * {@code {var-file}.private.md} (private data) and {@code {var-file}.cache.md} (last run).
  * The frontmatter stores only what the path cannot express; see docs/project-format.md.
  */
 public final class CardCodec {
 
     public static final String CARD_SUFFIX = ".md";
     public static final String PRIVATE_SUFFIX = ".private.md";
-    public static final String PRIVATE_EXAMPLE_SUFFIX = ".private.example.md";
-    public static final String RESULT_SUFFIX = ".result-data.md";
+    public static final String CACHE_SUFFIX = ".cache.md";
 
     private static final Pattern SOURCE_REF = Pattern.compile("([a-z]+)(?:/([a-z0-9][a-z0-9._-]*))?", Pattern.CASE_INSENSITIVE);
     private static final Pattern SIZE = Pattern.compile("\\d+x\\d+");
+    private static final Pattern OPERATION_ID = Pattern.compile("[A-Za-z0-9_.-]+");
+    private static final String OPENAPI = "openapi";
     private static final Pattern NUMBER = Pattern.compile("[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?");
     private static final Pattern ENDPOINT = Pattern.compile("(GET|POST|PUT|PATCH|DELETE)\\s+(\\S+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern WHITESPACE = Pattern.compile("(?U)\\s+");
@@ -41,46 +42,45 @@ public final class CardCodec {
     // ------------------------------------------------------------------ cards
 
     /**
-     * Renders a card. {@code scriptBody} is the body of the card's source script (when it
-     * exists): a card whose code still matches it stores an empty body. The card's position in
-     * the step is not stored here: it comes from the step's {@code flow.md}.
+     * Renders a card; its code always lives in the card itself. The card's position in the
+     * step is not stored here: it comes from the step's {@code flow.md}.
      */
-    public static String render(Card card, Optional<String> scriptBody) {
-        String type = Catalog.cardTypeOf(sourceTypeOf(card));
+    public static String render(Card card) {
+        String subtype = Names.trim(card.subtype());
+        String type = Catalog.cardTypeOf(sourceTypeOf(card), subtype);
         Catalog.Size size = Catalog.defaultSize(type);
         int width = card.width() == null ? size.width() : card.width();
         int height = card.height() == null ? size.height() : card.height();
         boolean customSize = width != size.width() || height != size.height();
         String code = card.code() == null ? "" : card.code();
-        boolean inherits = scriptBody.isPresent() && Names.trim(code).equals(Names.trim(scriptBody.get()));
 
         Map<String, Object> fields = new LinkedHashMap<>();
         String title = Names.trim(card.title());
         fields.put("title", title.isEmpty() ? card.varName() : title);
         fields.put("source", sourceRef(card));
-        fields.put("script", card.script());
+        fields.put("subtype", subtype.isEmpty() ? null : subtype);
         fields.put("endpoint", Names.trim(card.endpoint()));
+        String openapiId = Names.trim(card.openapiId());
+        fields.put("openapi-id", openapiId.isEmpty() ? null : openapiId);
         fields.put("timeout", card.timeout() == null ? Catalog.defaultTimeout(type) : card.timeout());
         fields.put("size", customSize ? width + "x" + height : null);
         fields.put("result-height", card.resultHeight());
-        return MdEnvelope.render(fields, inherits ? "" : MdEnvelope.fence(Catalog.languageOf(sourceTypeOf(card)), code));
+        return MdEnvelope.render(fields, MdEnvelope.fence(Catalog.languageOf(sourceTypeOf(card), subtype), code));
     }
 
-    /**
-     * Parses a card file. {@code fileBase} is the var-file (no extension); an empty body of a
-     * card bound to a source script is filled from {@code scripts} (warning when it is missing).
-     */
-    public static Parsed parse(String fileBase, String content, ScriptLookup scripts) {
+    /** Parses a card file. {@code fileBase} is the var-file (no extension). */
+    public static Parsed parse(String fileBase, String content) {
         MdEnvelope.Parsed md = MdEnvelope.parse(content);
         Map<String, String> f = md.fields();
         List<String> errors = validate(f);
         if (!errors.isEmpty()) {
             return new Parsed(null, errors, List.of());
         }
-        String[] ref = f.getOrDefault("source", "inline").split("/", -1);
+        String[] ref = f.get("source").split("/", -1);
         String sourceType = ref[0];
         String sourceName = ref.length > 1 ? ref[1] : "";
-        String type = Catalog.cardTypeOf(sourceType);
+        String subtype = f.get("subtype");
+        String type = Catalog.cardTypeOf(sourceType, subtype);
         Catalog.Size size = Catalog.defaultSize(type);
         Integer width = size.width();
         Integer height = size.height();
@@ -90,25 +90,16 @@ public final class CardCodec {
             height = Integer.valueOf(wh[1]);
         }
         String endpoint = f.getOrDefault("endpoint", "");
-        String script = f.get("script");
         String code = MdEnvelope.unfence(md.body());
-        List<String> warnings = new ArrayList<>();
-        if (script != null) {
-            Optional<String> body = scripts.body(sourceType, sourceName, script);
-            if (body.isEmpty()) {
-                warnings.add("script \"%s\" not found in source %s".formatted(script, f.get("source")));
-            } else if (Names.trim(code).isEmpty()) {
-                code = MdEnvelope.stripTrailingNewlines(body.get());
-            }
-        }
         Card card = new Card(
                 Names.fileNameToVarName(fileBase),
                 f.get("title"),
                 type,
                 sourceType,
+                subtype,
                 sourceName,
-                script,
                 endpoint,
+                f.get("openapi-id"),
                 httpMethodOf(endpoint),
                 f.containsKey("timeout") ? toInt(f.get("timeout")) : Catalog.defaultTimeout(type),
                 width,
@@ -117,7 +108,7 @@ public final class CardCodec {
                 code,
                 null,
                 null);
-        return new Parsed(card, List.of(), warnings);
+        return new Parsed(card, List.of(), List.of());
     }
 
     /** Frontmatter schema of a card file: one {@code "key: problem"} per violation. */
@@ -128,36 +119,55 @@ public final class CardCodec {
             errors.add("title: required");
         }
         String source = f.get("source");
-        if (source != null) {
-            if (!SOURCE_REF.matcher(source).matches()) {
-                errors.add("source: source must be {type-source} or {type-source}/{name-source}");
-            } else if (!Catalog.SOURCE_TYPES.contains(source.split("/")[0])) {
-                errors.add("source: unknown type-source");
+        String sourceType = null;
+        if (source == null || source.isEmpty()) {
+            errors.add("source: required ({type-source}/{name-source}, or rawvalue)");
+        } else if (!SOURCE_REF.matcher(source).matches()) {
+            errors.add("source: source must be {type-source} or {type-source}/{name-source}");
+        } else if (!Catalog.SOURCE_TYPES.contains(source.split("/")[0])) {
+            errors.add("source: unknown type-source");
+        } else {
+            sourceType = source.split("/")[0];
+            if (!Catalog.hasSources(sourceType) && source.contains("/")) {
+                errors.add("source: " + sourceType + " cards have no name-source (write source: " + sourceType + ")");
             }
         }
-        String script = f.get("script");
-        if (script != null) {
-            String problem = Names.camelNameProblem("script", script);
+        String subtype = f.get("subtype");
+        if (sourceType != null) {
+            String problem = Catalog.subtypeProblem(sourceType, subtype);
             if (problem != null) {
-                errors.add("script: " + problem);
+                errors.add("subtype: " + problem);
             }
+        }
+        String openapiId = f.get("openapi-id");
+        if (openapiId != null && sourceType != null && !OPENAPI.equals(sourceType)) {
+            errors.add("openapi-id: only openapi cards name a spec operation");
+        } else if (openapiId != null && !OPERATION_ID.matcher(openapiId).matches()) {
+            errors.add("openapi-id: must be the spec's operationId (letters, digits, _ . -)");
+        }
+        if (f.containsKey("script")) {
+            errors.add("script: sources have no scripts; the card holds its own code");
         }
         intProblem(f, "timeout", false, 100, 120_000).ifPresent(errors::add);
         if (f.containsKey("size") && !SIZE.matcher(f.get("size")).matches()) {
             errors.add("size: size must be {width}x{height}");
         }
         intProblem(f, "result-height", false, 24, 600).ifPresent(errors::add);
-        if (errors.isEmpty() && script != null && (source == null || !source.contains("/"))) {
-            errors.add("script: script requires source: {type-source}/{name-source}");
-        }
         return errors;
     }
 
-    /** {@code source:} reference, e.g. mongo/products-db; inline cards carry none. */
+    /**
+     * {@code source:} reference, e.g. mongo/products-db, or the type alone for sourceless
+     * types ({@code rawvalue}, {@code jsonassert});
+     * every card declares one, so a card without a type is rejected on save.
+     */
     public static String sourceRef(Card card) {
         String type = Names.trim(card.sourceType());
-        if (type.isEmpty() || "inline".equals(type)) {
+        if (type.isEmpty()) {
             return null;
+        }
+        if (!Catalog.hasSources(type)) {
+            return type; // rawvalue, jsonassert: the type alone
         }
         String name = Names.trim(card.sourceName());
         return name.isEmpty() ? type : type + "/" + name;
@@ -199,7 +209,8 @@ public final class CardCodec {
     public static CardRun parseResult(String content) {
         MdEnvelope.Parsed md = MdEnvelope.parse(content);
         Map<String, String> f = md.fields();
-        String status = "success".equals(f.get("status")) || "error".equals(f.get("status")) ? f.get("status") : "idle";
+        String raw = f.getOrDefault("status", "");
+        String status = List.of("success", "error", "skipped").contains(raw) ? raw : "idle";
         return new CardRun(status, f.getOrDefault("summary", ""), MdEnvelope.unfence(md.body()), f.getOrDefault("elapsed", ""), f.get("ran-at"));
     }
 

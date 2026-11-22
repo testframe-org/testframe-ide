@@ -1,3 +1,4 @@
+import { languageOfKind } from './catalog';
 import type { Card } from './client-api/testframe.z';
 
 // --- LIGHTWEIGHT SYNTAX HIGHLIGHTING ---
@@ -83,29 +84,10 @@ export const colorLine = (line: string, lang: HighlightLang): string => {
   return html + escapeHtml(line.slice(last));
 };
 
-// Language of a card's code: decided by its source type first, then by the card type
-export const languageOf = (card: Pick<Card, 'type' | 'sourceType'>): HighlightLang => {
-  switch (card.sourceType) {
-    case 'mongo':
-    case 'restapi':
-    case 'graphql':
-    case 'kafka':
-    case 'grpc':
-      return 'js';
-    case 'oracle':
-    case 'postgres':
-    case 'mysql':
-    case 'sqlserver':
-      return 'sql';
-    case 'assert':
-    case 'filter':
-    case 'mapper':
-      return 'jsonassert';
-    case 'swagger':
-      return 'json';
-    default:
-      return card.type === 'json' ? 'json' : card.type === 'validation' ? 'jsonassert' : 'js';
-  }
+// Language of a card's code: the fence language of its (type-source, subtype), served by the catalog
+export const languageOf = (card: Pick<Card, 'sourceType' | 'subtype'>): HighlightLang => {
+  const lang = languageOfKind(card.sourceType, card.subtype);
+  return lang === 'js' || lang === 'json' || lang === 'sql' || lang === 'jsonassert' ? lang : 'text';
 };
 
 export const highlightSyntax = (code: string, lang: HighlightLang) =>

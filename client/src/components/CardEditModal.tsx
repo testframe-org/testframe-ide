@@ -7,18 +7,20 @@ import {
   Sliders,
   Trash2,
   X,
-  XCircle
+  XCircle,
+  MinusCircle
 } from 'lucide-react';
-import { SOURCE_TYPES, cardTypeOf } from '../catalog';
+import { SOURCE_TYPES, cardTypeOf, formKindOf, hasSources, isCompleteKind, subtypesOf } from '../catalog';
 import { cardVarName, normalizeVarName } from '../frames';
 import { useI18n } from '../i18n';
 import type { Card, CardRunResult, SelectedContext, SourceDef } from '../client-api/testframe.z';
 import { RunOutput } from './RunOutput';
-import { SourceForm, formKindOf } from './SourceForm';
+import { SourceForm } from './SourceForm';
 
 interface CardEditModalProps {
   selectedContext: SelectedContext | null; // null = closed
   sources: SourceDef[];
+  project: string; // storage name of the project (openapi operations are read per project)
   onClose: () => void;
   onRun: (cardId: string) => void;
   running: boolean; // a run (single card or flow) is in progress
@@ -47,6 +49,7 @@ const sectionCls = 'text-[11px] font-semibold text-slate-400 uppercase tracking-
 export function CardEditModal({
   selectedContext,
   sources,
+  project,
   onClose,
   onRun,
   running,
@@ -71,9 +74,12 @@ export function CardEditModal({
 
   const { card } = selectedContext;
   const update = (updates: Partial<Card>) => onUpdateCard(card.id, updates);
-  const sourceType = card.sourceType || 'inline';
+  const sourceType = card.sourceType;
   const source = sources.find((s) => s.typeSource === sourceType && s.name === card.sourceName);
-  const formKind = formKindOf(sourceType);
+  const subtypes = subtypesOf(sourceType);
+  // the form waits until the card's (type, subtype) is complete
+  const complete = isCompleteKind(sourceType, card.subtype);
+  const formKind = formKindOf(sourceType, card.subtype);
 
   return (
     <div
@@ -115,7 +121,7 @@ export function CardEditModal({
         <div className="flex-1 flex min-h-0">
           {/* LEFT: GENERAL */}
           <div className="w-80 shrink-0 border-r border-slate-200 overflow-y-auto p-4 space-y-5 bg-slate-50/40">
-            {/* Source first: the type-source decides the rest of the card */}
+            {/* Source first: type-source -> subtype (when the type has them) -> name-source */}
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className={sectionCls}>{t('frameSource')}</span>
@@ -130,9 +136,12 @@ export function CardEditModal({
                   autoFocus={!card.sourceType}
                   onChange={(e) => {
                     const next = e.target.value;
-                    // the project's first source of that type is the default name-source
-                    const firstSource = sources.find((s) => s.typeSource === next)?.name ?? '';
-                    update({ sourceType: next, type: cardTypeOf(next), sourceName: firstSource, script: undefined });
+                    // a new type clears the subtype (a type with a single subtype gets it); the
+                    // project's first source of that type is the default name-source (types
+                    // without named sources keep none)
+                    const firstSource = hasSources(next) ? sources.find((s) => s.typeSource === next)?.name ?? '' : '';
+                    const only = subtypesOf(next).length === 1 ? subtypesOf(next)[0] : undefined;
+                    update({ sourceType: next, subtype: only, type: cardTypeOf(next, only), sourceName: firstSource, openapiId: undefined });
                   }}
                   className={`${inputCls} ${card.sourceType ? '' : 'ring-2 ring-blue-500/40 border-blue-500'}`}
                 >
@@ -142,12 +151,34 @@ export function CardEditModal({
                   ))}
                 </select>
               </div>
-              {card.sourceType && sourceType !== 'inline' && (
+              {subtypes.length > 0 && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">subtype</label>
+                  <select
+                    value={card.subtype ?? ''}
+                    autoFocus={!card.subtype}
+                    onChange={(e) => {
+                      const next = e.target.value || undefined;
+                      update({ subtype: next, type: cardTypeOf(sourceType, next) });
+                    }}
+                    className={`${inputCls} ${card.subtype ? '' : 'ring-2 ring-blue-500/40 border-blue-500'}`}
+                  >
+                    {!card.subtype && <option value="" disabled>{t('subtypePlaceholder')}</option>}
+                    {card.subtype && !subtypes.includes(card.subtype) && (
+                      <option value={card.subtype}>{card.subtype} (?)</option>
+                    )}
+                    {subtypes.map((sub) => (
+                      <option key={sub} value={sub}>{sub}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {hasSources(sourceType) && (
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">name-source</label>
                   <select
                     value={card.sourceName || ''}
-                    onChange={(e) => update({ sourceName: e.target.value, script: undefined })}
+                    onChange={(e) => update({ sourceName: e.target.value, openapiId: undefined })}
                     className={inputCls}
                   >
                     <option value="">{t('sourceNamePlaceholder')}</option>
@@ -183,7 +214,7 @@ export function CardEditModal({
                   className={inputCls}
                 />
               </div>
-              {formKind !== 'http' && formKind !== 'swagger' && (
+              {formKind && formKind !== 'request' && formKind !== 'swagger' && (
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">{t('endpointField')}</label>
                   <input type="text" value={card.endpoint} onChange={(e) => update({ endpoint: e.target.value })} className={inputCls} />
@@ -273,6 +304,12 @@ export function CardEditModal({
                     <span className="text-xs font-semibold text-blue-700">{t('statusRunning')}</span>
                   </>
                 )}
+                {card.status === 'skipped' && (
+                  <>
+                    <MinusCircle className="w-4 h-4 text-slate-500" />
+                    <span className="text-xs font-semibold text-slate-600">{t('statusSkipped')}</span>
+                  </>
+                )}
                 {card.status === 'idle' && (
                   <>
                     <div className="w-2.5 h-2.5 rounded-full bg-slate-300" />
@@ -295,13 +332,19 @@ export function CardEditModal({
           <div className="flex-1 min-w-0 overflow-y-auto p-5 space-y-5">
             <div className="space-y-3">
               <div className="flex items-baseline justify-between gap-2">
-                <span className={sectionCls}>{card.sourceType ? t('sourceFormTitle', { type: sourceType }) : t('sourceTypePlaceholder')}</span>
+                <span className={sectionCls}>
+                  {complete
+                    ? t('sourceFormTitle', { type: card.subtype ? `${sourceType} · ${card.subtype}` : sourceType })
+                    : card.sourceType ? t('subtypePlaceholder') : t('sourceTypePlaceholder')}
+                </span>
                 {card.sourceName && <span className="text-[11px] font-mono text-slate-500 truncate">{sourceType}/{card.sourceName}</span>}
               </div>
-              {card.sourceType ? (
-                <SourceForm card={card} source={source} onChange={update} completionVars={completionVars} />
+              {complete ? (
+                <SourceForm card={card} project={project} source={source} onChange={update} completionVars={completionVars} />
               ) : (
-                <p className="text-xs text-slate-500 border border-dashed border-slate-300 rounded-lg p-4">{t('sourceTypeFirstHint')}</p>
+                <p className="text-xs text-slate-500 border border-dashed border-slate-300 rounded-lg p-4">
+                  {card.sourceType ? t('subtypeFirstHint') : t('sourceTypeFirstHint')}
+                </p>
               )}
             </div>
 
@@ -309,14 +352,14 @@ export function CardEditModal({
             {lastRun && (
               <div
                 className={`rounded-xl border p-3 space-y-2 ${
-                  lastRun.status === 'error' ? 'border-rose-200 bg-rose-50/50' : 'border-emerald-200 bg-emerald-50/40'
+                  lastRun.status === 'error' ? 'border-rose-200 bg-rose-50/50' : lastRun.status === 'skipped' ? 'border-slate-200 bg-slate-50' : 'border-emerald-200 bg-emerald-50/40'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className={sectionCls}>{t('lastRunResult')}</span>
                   <span className="text-[11px] font-mono text-slate-500">{lastRun.at}</span>
                 </div>
-                <p className={`text-xs font-medium ${lastRun.status === 'error' ? 'text-rose-700' : 'text-emerald-700'}`}>
+                <p className={`text-xs font-medium ${lastRun.status === 'error' ? 'text-rose-700' : lastRun.status === 'skipped' ? 'text-slate-600' : 'text-emerald-700'}`}>
                   {lastRun.text}
                 </p>
                 <RunOutput

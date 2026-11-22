@@ -1,2 +1,2 @@
-# Local run output of the editor (last result of each card)
-*.result-data.md
+# Generated local files: last run of each card, openapi spec caches
+*.cache.md

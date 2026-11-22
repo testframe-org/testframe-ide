@@ -1,8 +1,8 @@
 // Code completion for the card editors (pure logic, no DOM).
 //
 // Two modes:
-// - 'bindings' (http/swagger bodies, queries, json, code): only `{{varName.path}}` bindings.
-// - 'jsonassert' (assert lines, filter/mapper expressions): bindings plus the jsonassert
+// - 'bindings' (request bodies, mongo/sql queries, rawvalue json, code): only `{{varName.path}}` bindings.
+// - 'jsonassert' (jsonassert script and conditional cards): bindings plus the jsonassert
 //   language: built-in functions (`$sum(`), keywords, var-names and the fields of their
 //   values. In jsonassert '$' only prefixes built-in functions; variables are plain names.
 //

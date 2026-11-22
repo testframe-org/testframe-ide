@@ -1,0 +1,21 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "TestFrame framework echo API",
+    "version": "2",
+    "description": "In-test targets served by the framework server itself. The spec names no server: requests go to the origin this document is served from."
+  },
+  "paths": {
+    "/api/v2/health": {
+      "get": { "operationId": "health", "summary": "Service status", "responses": { "200": { "description": "status" } } }
+    },
+    "/api/v2/echo": {
+      "post": {
+        "operationId": "echo",
+        "summary": "Echoes the JSON body (201 with request_id)",
+        "requestBody": { "content": { "application/json": { "schema": { "type": "object" } } } },
+        "responses": { "201": { "description": "request_id, status and the echoed body" } }
+      }
+    }
+  }
+}

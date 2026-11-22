@@ -5,6 +5,7 @@ import {
   Copy,
   Edit3,
   Loader2,
+  MinusCircle,
   XCircle
 } from 'lucide-react';
 import { highlightSyntax, languageOf } from '../highlight';
@@ -76,6 +77,9 @@ export function TestBlockCard({
     ringStyle = 'border-emerald-500 ring-2 ring-emerald-500/30 shadow-md';
   } else if (card.status === 'error') {
     ringStyle = 'border-rose-500 ring-2 ring-rose-500/30 shadow-md';
+  } else if (card.status === 'skipped') {
+    // neutral: the card came after a false conditional in its step
+    ringStyle = 'border-slate-500 border-dashed ring-2 ring-slate-400/25 shadow-md opacity-70';
   } else if (isSelected) {
     ringStyle = 'border-blue-600 ring-2 ring-blue-600/30 shadow-lg';
   }
@@ -127,6 +131,9 @@ export function TestBlockCard({
           {card.status === 'error' && (
             <XCircle className="w-4 h-4 text-rose-700" />
           )}
+          {card.status === 'skipped' && (
+            <MinusCircle className="w-4 h-4 text-slate-600" aria-label={t('statusSkipped')} />
+          )}
         </div>
       </div>
 
@@ -138,9 +145,10 @@ export function TestBlockCard({
               {
                 json: 'bg-amber-400',
                 js: 'bg-yellow-300',
+                query: 'bg-lime-400',
                 sql: 'bg-purple-400',
                 jsonassert: 'bg-pink-400',
-                validation: 'bg-emerald-400',
+                condition: 'bg-emerald-400',
                 request: 'bg-sky-400'
               }[card.type]
             }`}
@@ -218,10 +226,16 @@ export function TestBlockCard({
             </div>
             <div
               className={`flex items-center gap-1.5 text-[10px] font-semibold shrink-0 ${
-                lastRun.status === 'error' ? 'text-rose-300' : 'text-emerald-300'
+                lastRun.status === 'error' ? 'text-rose-300' : lastRun.status === 'skipped' ? 'text-slate-400' : 'text-emerald-300'
               }`}
             >
-              {lastRun.status === 'error' ? <XCircle className="w-3 h-3 shrink-0" /> : <CheckCircle2 className="w-3 h-3 shrink-0" />}
+              {lastRun.status === 'error' ? (
+                <XCircle className="w-3 h-3 shrink-0" />
+              ) : lastRun.status === 'skipped' ? (
+                <MinusCircle className="w-3 h-3 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-3 h-3 shrink-0" />
+              )}
               <span className="truncate">{t('lastRunResult')} · {lastRun.at}</span>
             </div>
             <RunOutput

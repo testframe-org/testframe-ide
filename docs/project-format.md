@@ -1,7 +1,7 @@
 # Project format (`{project}/testframe/`)
 
 How a TestFrame project is stored on disk. Contract owner: the framework server —
-`server/.../format/` (envelope, naming rules, card/source codecs, validation; unit-tested
+`server/.../format/` (envelope, naming rules, catalog, card/source codecs, code rules; unit-tested
 against the reference project byte for byte) and `server/.../store/ProjectFileStore.java`
 (storage, path sanitization, replace semantics). Clients exchange JSON with the API and never
 read or write these files themselves. Reference project: `examples/product-test/testframe/`.
@@ -11,70 +11,146 @@ The project is in beta: this format changes without migrations or legacy loaders
 
 ## Principles
 
-1. **The path is the identity.** Frame, step number, card variable, source type/name and
-   script name are read from the path only. Frontmatter never repeats them, so renaming a
-   file or folder cannot leave it contradicting its own frontmatter.
+1. **The path is the identity.** Frame, step number, card variable and source type/name are
+   read from the path only. Frontmatter never repeats them, so renaming a file or folder
+   cannot leave it contradicting its own frontmatter.
 2. **Frontmatter stores only what the path cannot express**, and omits values equal to
-   their defaults (`size`) or empty (`endpoint`, `source`). It may be empty.
+   their defaults (`size`) or empty (`endpoint`). It may be empty.
 3. **One envelope for every file:** a `-------------------` line, `key: value` lines and a
-   closing `-------------------` line, then the body. Code bodies (cards and scripts) are a
-   single fenced Markdown block tagged with the language of the source type; documentation
-   bodies (source docs, private data) are plain Markdown.
-4. **No duplicated code.** A card that runs a source script references it (`script:`)
-   and stores an empty body. The card only has its own body when it overrides the script.
-5. **Saving replaces.** Saving a frame replaces its whole directory, and saving a source
-   replaces its files and script folder. Removed cards and scripts do not linger on disk.
-6. **Private data sits next to what it belongs to** as `{name}.private.md` (gitignored),
-   with an optional versioned template `{name}.private.example.md`.
+   closing `-------------------` line, then the body. A card's body is a single fenced
+   Markdown block tagged with the language of its (type-source, subtype).
+4. **Every card declares its type-source** (`source:`), and its **subtype** when the type has
+   subtypes. A card always holds its own code: sources have no scripts.
+5. **A source is only its connection:** `{type}/{name}.md` holds `base-url` and nothing else.
+6. **Saving replaces.** Saving a frame replaces its whole directory, and saving a source
+   replaces its files. Removed cards do not linger on disk.
+7. **Private data sits next to what it belongs to** as `{name}.private.md`, always gitignored.
+   There are no versioned templates.
+8. **Generated local files end in `.cache.md`** (a card's last run, an openapi source's
+   operations) and are gitignored (`testframe/.gitignore`: `*.cache.md`).
 
 ## Layout
 
 ```
 {project}/testframe/
+  .gitignore                       *.cache.md (written by the server)
   frames/
     {frame}/                       one flow (canvas), kebab-case, e.g. active-products-echo
       step-{n}/                    step number n (1-based, ordered numerically)
         flow.md                    the step's card sequence: one card file name per line, in order
         {var-file}.md              one card; var-name = camelCase(var-file)
         {var-file}.private.md      optional private data of that card (gitignored)
+        {var-file}.cache.md        last run of that card (generated, gitignored)
   sources/
-    {type-source}/                 e.g. mongo
-      {name-source}.md             base-url + documentation
+    {type-source}/                 openapi, mongo, sql, kafka, grpc
+      {name-source}.md             frontmatter base-url, no body
       {name-source}.private.md     optional private data (gitignored)
-      {name-source}/               scripts of that source
-        {script-file}.md           one custom query/method; script name = camelCase(script-file)
+      {name-source}.cache.md       openapi only: the spec's cached operations (generated, gitignored)
 ```
-
-Any `*.private.md` may have a versioned `*.private.example.md` sibling (see below).
 
 The names convert both ways: `getActiveProducts` ↔ `get-active-products.md`. Var-names
 must be camelCase with no consecutive capitals (`getHttpData`, not `getHTTPData`), or the
 round trip would lose information. The card editor normalizes input, and the server rejects
 (400) var-names that do not survive the round trip and duplicate var-names within a frame,
-because var-names are the binding identity. Script names follow the same camelCase rule;
-source names match `[a-z0-9][a-z0-9._-]*` (at least 2 characters).
+because var-names are the binding identity. Source names match `[a-z0-9][a-z0-9._-]*` (at
+least 2 characters) and cannot end in `.cache` or `.private`.
+
+## Source types and subtypes
+
+Every source has a TYPE; a card bound to it picks a SUBTYPE of that type. The table lives in
+the server catalog (`format/Catalog`, served by `GET /api/v2/catalog`); the editor keeps no copy.
+
+| type | named sources | subtypes (card-level) | card type | fence | notes |
+|---|---|---|---|---|---|
+| `openapi` | yes | `restapi`, `swagger`, `graphql` | request | `js` (`json` for swagger) | `base-url` is the OpenAPI spec JSON; cards pick one of its operations |
+| `mongo` | yes | `find`, `aggregation` | query | `json` | body is one JSON object (see below), read-only |
+| `sql` | yes | `oracle`, `postgres`, `mysql`, `sqlserver` | sql | `sql` | |
+| `jsonassert` | no | `script`, `conditional` | jsonassert (script) / condition (conditional) | `jsonassert` | code always lives in the card (see below) |
+| `kafka`, `grpc` | yes | — | js | `js` | |
+| `rawvalue` | no | `json` (the only one for now) | json | `json` | a literal value held by the card, published as its variable |
+
+Types without named sources (`rawvalue`, `jsonassert`) write the type alone
+(`source: rawvalue`); the others write `source: {type}/{name}`.
 
 ## Cards: `frames/{frame}/step-{n}/{var-file}.md`
+
+Keys, in this order:
 
 | Key | Required | Meaning |
 |---|---|---|
 | `title` | yes | display name on the canvas (free text) |
-| `source` | no | `{type-source}/{name-source}` (or just `{type-source}`); omitted = inline |
-| `script` | no | camelCase script of `source`; empty body = inherit it |
-| `endpoint` | no | `METHOD /path` for requests (HTTP method is parsed from it) |
-| `timeout` | no | ms (100–120000); default per type (request/js/sql 5000, jsonassert/json 2000, validation 1000) |
-| `size` | no | `{width}x{height}`, only when different from the type default |
-| `result-height` | no | px (24–600) of the last-run panel under the card's script |
+| `source` | yes | `{type-source}/{name-source}`, or the type alone (`rawvalue`, `jsonassert`; also allowed for typed cards without a named source yet) |
+| `subtype` | when the type has subtypes | one subtype of the type (e.g. `find`); absent otherwise |
+| `endpoint` | no | `METHOD /path` for openapi cards: one operation of the source's spec |
+| `openapi-id` | no (openapi only) | the operation's `operationId` in the spec: the card's operation identity |
+| `timeout` | no | ms (100–120000); default per card type (request/query/js/sql 5000, jsonassert/json 2000, condition 1000) |
+| `size` | no | `{width}x{height}`, only when different from the card type default |
+| `result-height` | no | px (24–600) of the last-run panel under the card's code |
 
-Derived, never stored: card id (`{frame}/step-{n}/{var-file}`), step id/number,
-var-name, http-method, and the card type, which follows the source type (`cardTypeOf`):
-restapi/graphql/swagger → request, mongo (and kafka/grpc) → js, oracle/postgres/mysql/sqlserver
-→ sql, filter/mapper → jsonassert, assert → validation, inline (no `source`) → json.
+A `script:` key is invalid (sources have no scripts). Derived, never stored: card id
+(`{frame}/step-{n}/{var-file}`), step id/number, var-name, http-method, the card type and the
+fence language, all following (type-source, subtype) — see the table above. A card without
+`source:`, with an unknown type, a missing/unknown subtype or a name-source on a sourceless
+type is rejected on save (400) and reported in `errors` on load.
 
-The fence language also follows the source type: mongo/restapi/graphql/kafka/grpc → `js`,
-SQL types → `sql`, assert/filter/mapper → `jsonassert`, swagger/inline (and JSON outputs) →
-`json` (`text` when the output is not JSON). A card that inherits a source script stores no
-body at all.
+## Mongo body (`mongo` cards)
+
+One JSON object (fenced as ```` ```json ````); `{{bindings}}` may appear anywhere in it (the
+rule checks the body with every binding standing for any value, and checks the resolved
+types again at run time). Unknown keys are rejected.
+
+- subtype `find`: `{ "collection": "products", "filter": { "ativo": true } }`, optional
+  `projection`, `sort` (objects), `limit`, `skip` (non-negative integers; at most 1000 documents).
+- subtype `aggregation`: `{ "collection": "products", "pipeline": [ { "$match": { "ativo": true } } ] }`.
+
+Read-only: write stages (`$out`, `$merge`) are rejected anywhere in the body, before anything
+connects. Values are JSON; MongoDB extended JSON (`{"$oid": "..."}`) is understood. The
+connection is the `base-url` of the saved `sources/mongo/{name}.md`.
+
+## jsonassert cards
+
+- subtype `script`: one statement per line (`//` lines are comments). `assert <expr> <op> <expr>`
+  lines check (a failing assert fails the card and stops the run); plain expressions compute.
+  The value of the last plain expression is the card's variable (without one, the last
+  assertion's outcome `{passed, actual, expected, operator, jsonata, error}` is). It covers
+  checks, filters and mappers: `assert $count(items) > 0` then `items[price > 100].name`.
+- subtype `conditional`: exactly one boolean expression (no `assert`), e.g.
+  `$count(activeProducts) > 0`, published as the card's variable. `true`: the step goes on;
+  `false`: the remaining cards of the current step are skipped (outcome status `skipped`, not an
+  error) and the run continues with the next step. A non-boolean result or an evaluation error is
+  a card error. Run alone (the editor's Run button) it just shows the boolean.
+
+Both evaluate against every variable published so far in the frame (by var-name), with the
+jsonassert Java engine (`$` only prefixes built-in functions; `=` is equality inside
+expressions, `==` in assert lines).
+
+## OpenAPI sources and their cache
+
+An `openapi` source's `base-url` is its OpenAPI (or Swagger 2) spec JSON. When the source is
+saved, the server reads the spec and writes `sources/openapi/{name}.cache.md`:
+
+````
+-------------------
+spec-url: http://localhost:18081/api/docs/openapi.json
+api-base: http://localhost:18081
+fetched-at: 2026-11-22T04:56:41.340Z
+-------------------
+```json
+[ { "operationId" : "create", "method" : "POST", "path" : "/api/products", "summary" : "Criar produto" } ]
+```
+````
+
+`api-base` is `servers[0].url` (resolved against the spec URL), or the spec URL's origin when
+the spec names no server. The cache is the source of truth afterwards: the card editor's
+operation select, the endpoint check on load and the runner's URL resolution read it. A
+missing cache (or one made from another spec URL) is fetched once and written; a spec that
+cannot be read answers 502 (a source save still succeeds and reports it in `warnings`).
+
+An openapi card names its operation by `openapi-id` (the spec's `operationId`, its identity)
+plus `endpoint` (its `METHOD /path`). On load, an `openapi-id` missing from the cached spec, or an
+`endpoint` that no longer matches that operation's method + path, is a warning in `errors`
+(cards without `openapi-id` are checked by `endpoint`). The runner resolves the request by
+`openapi-id`, so a card follows its operation when the spec moves the path.
 
 ## Step sequence: `flow.md`
 
@@ -87,66 +163,61 @@ sequence is never silently lost.
 
 ## Sources: `sources/{type-source}/{name-source}.md`
 
-- `{name-source}.md` has one frontmatter key, `base-url`. For `swagger` it points at the
-  OpenAPI spec, which fully defines the endpoints, so swagger sources have no scripts.
-  For `mongo` it is the connection URI, and for `restapi`/`assert` it is the service URL.
+- `{name-source}.md` has one frontmatter key, `base-url`, and no body (any other key or a
+  body makes the file invalid: it is skipped and reported in `errors`). For `openapi` it is
+  the spec URL, for `mongo` the connection URI (naming the database).
 - `{name-source}.private.md` has an empty frontmatter. It is written only when it has content.
-- `{name-source}/{script-file}.md` has an empty frontmatter, reserved for future script
-  parameters. The body is the query or method as a fenced block. Allowed for every type
-  except `swagger`.
+- Sources of `rawvalue` and `jsonassert` cannot be saved (those types have no named sources).
 
-## Private data: `*.private.md` / `*.private.example.md`
+## Private data: `*.private.md`
 
-- Cards (`{var-file}.private.md`) and sources (`{name-source}.private.md`) keep secrets
-  and access notes in a sibling file with an empty frontmatter. The IDE edits it in the
-  card edit modal (cards) and the Sources tab (sources).
-- `*.private.md` is gitignored. A versioned `*.private.example.md` next to it is the
-  template: it is loaded when the private file is missing, and the next save writes the
-  real `.private.md`. The server never deletes `*.private.example.md`.
-- `bun run example:push` ships the example project with templates only.
+Cards (`{var-file}.private.md`) and sources (`{name-source}.private.md`) keep secrets and access
+notes in a sibling file with an empty frontmatter, always gitignored. The IDE edits it in the
+card edit modal (cards) and the Sources tab (sources). An absent file means no private data.
 
-## Last run: `{var-file}.result-data.md`
+## Last run: `{var-file}.cache.md`
 
-After a card runs (whole flow or the card editor's Run, both executed by `POST /api/v2/run*`), the editor stores its last result next
-to it: frontmatter `status`, `ran-at`, `elapsed`, `summary`; the body is the output fenced
-as `json` (or `text` when it does not parse as JSON). The server adds `*.result-data.md` to the
-project's `testframe/.gitignore`, keeps a result while its card exists and deletes it with the
-card. The editor shows it under the card's script and in the card editor.
+After a card runs (whole flow or the card editor's Run, both executed by `POST /api/v2/run*`),
+the editor stores its last result next to it: frontmatter `status` (success|error|skipped), `ran-at`, `elapsed`,
+`summary`; the body is the output fenced as `json` (or `text` when it does not parse as JSON).
+The server adds `*.cache.md` to the project's `testframe/.gitignore`, keeps a result while its
+card exists and deletes it with the card. The editor shows it under the card's code and in the
+card editor.
 
-## Code rules per source type
+## Code rules per (type, subtype)
 
-The rules live in the server (`format/CodeRules`). They are enforced on both saves (a rejected
-frame or source answers 400 with every problem) and served for live feedback in the editors
-(`POST /api/v2/validate`, called by the card form and cached per code; empty code is a draft):
+The rules live in the server (`format/CodeRules`). They are enforced on frame saves (a rejected
+frame answers 400 with every problem), checked by the runner before a card runs, and served for
+live feedback in the editor (`POST /api/v2/validate` `{sourceType, subtype, code}`, cached per
+code; empty code is a draft):
 
-| type-source | Accepted code |
+| type / subtype | Accepted code |
 |---|---|
-| `mongo` | one mongo shell call: `db.<collection>.find\|findOne\|aggregate\|countDocuments\|distinct(...)`, optional `.sort/.skip/.limit`, `//` comments |
-| `oracle` | one `SELECT` statement, `--` comments |
-| `assert` | jsonassert lines only: `assert <expr> (==\|!=\|>\|>=\|<\|<=) <expr>`, `//` comments |
+| `mongo` / `find`, `aggregation` | the JSON body above |
+| `sql` / `oracle` | one `SELECT` statement, `--` comments |
+| `jsonassert` / `script` | every non-comment line parses: an `assert <expr> (==\|!=\|>\|>=\|<\|<=) <expr>` line or a jsonassert expression |
+| `jsonassert` / `conditional` | exactly one jsonassert expression, without `assert` |
 
 ## Execution order
 
 A step is one ordered sequence of cards (no pre/post phases). Cards run in the order their
 files are listed in the step's `flow.md`. A request body comes from the nearest `json` card
 **before** the card; a request or mongo result is written into the first `json` card **after**
-it and published as the card's variable.
+it and published as the card's variable. An openapi request goes to the `api-base` of its
+source's cached spec + the operation path (a card without name-source sends relative paths to
+the framework server itself).
 
-An `assert` card evaluates against **every variable published so far in the frame**, as an
+A `jsonassert` card evaluates against **every variable published so far in the frame**, as an
 object keyed by var-name: `assert $count(activeProducts) > 0` reads the `activeProducts`
-variable directly (`$` alone is the whole variables object).
+variable directly. A `conditional` that evaluates to `false` skips the rest of its step (those
+cards come back with status `skipped`) and the run continues with the next step; the run stops
+at the first `error` card.
 
-## Bindings and references
+## Bindings
 
-- **Bindings between cards:** `{{varName}}` or `{{varName.path.0.field}}` in a JSON body
-  resolves to the value published by an earlier card with that var-name. Var-names are
-  unique per frame, so a binding is unambiguous.
-- **Source scripts:** `source: mongo/products-db` + `script: getActiveProducts` points at
-  `sources/mongo/products-db/get-active-products.md`. When the card body is empty, the
-  server loads the script body into the card (from the saved sources). If the card's code
-  still matches the saved script on save, the body is written empty again. If the user edits
-  the code, it is saved as an override. A reference to a missing script loads with a warning
-  (in `errors`, shown in the editor console).
+`{{varName}}` or `{{varName.path.0.field}}` in a JSON body (rawvalue cards, mongo bodies)
+resolves to the value published by an earlier card with that var-name. Var-names are unique
+per frame, so a binding is unambiguous.
 
 ## API
 
@@ -155,65 +226,72 @@ The API exchanges structured JSON; the server builds every path and file. Full s
 
 - `GET /api/v2/frames/{project}` → `{frames, errors}`: frames sorted by name, steps renumbered
   from 1 in numeric order, cards in the order of the step's `flow.md`, each with its private
-  data and last run. Invalid files are skipped and reported in `errors`.
+  data and last run. Invalid files are skipped and reported in `errors`, as are openapi
+  endpoints missing from their source's cached spec.
 - `POST /api/v2/frames` `{project, frame: {name, steps}}`: replaces `frames/{slug(name)}/`;
   other frames are untouched. Steps are numbered by position, card order is stored in each
   step's `flow.md`.
 - `POST /api/v2/frames/results` `{project, frame, step, varName, result}`: writes the card's
-  `{var-file}.result-data.md`.
-- `GET /api/v2/sources/{project}` → `{sources}`; `POST /api/v2/sources` `{project, sources}`:
-  for each sent source, `{type}/{name}.md`, `{type}/{name}.private.md` and the `{type}/{name}/`
-  script folder are replaced. Sources that are not sent are untouched.
-- `POST /api/v2/run` `{project, frame, steps: [{number, cards}]}`: runs the frame on the server
-  (execution section above, in the sent order, stopping at the first error card) and returns
-  `{project, frame, results: [{varName, status, text, output, at, ranAt, code}], vars}` —
-  everything the editor needs to show and store each card's run (`code` is set when the run
-  rewrote that JSON result card's body). Bindings, HTTP requests, mongo scripts, assertions and
-  the code rules all execute server-side; nothing here reads or writes project files.
-- `POST /api/v2/run/card` `{project, step, card, vars, payload, resultCard}`: the same engine
-  for a single card (the editor's Run button), returning `{result, vars}`.
+  `{var-file}.cache.md`.
+- `GET /api/v2/sources/{project}` → `{sources: [{typeSource, name, baseUrl, privateData}], errors}`;
+  `POST /api/v2/sources` `{project, sources}`: for each sent source, `{type}/{name}.md` and
+  `{type}/{name}.private.md` are replaced (openapi sources then rewrite their cache; failures
+  come back in `warnings`). Sources that are not sent are untouched.
+- `GET /api/v2/sources/openapi/{name}/operations?project=` → `{specUrl, baseUrl, fetchedAt,
+  operations: [{operationId, method, path, summary}]}`, read from the cache.
+- `POST /api/v2/run` `{project, frame, steps: [{number, cards}]}` and `POST /api/v2/run/card`
+  run cards on the server (execution section above): per-card outcomes with status
+  `success`, `error` (the run stops there) or `skipped` (after a false conditional).
+- `POST /api/v2/run/mongo` `{project, source, subtype, body}`: runs one mongo body.
 - Invalid data is rejected with 400 `{status, message}` before anything is written. The store
   still validates every path: it strips `..`, applies a character whitelist, checks that the
   path stays under the projects dir, accepts only `.md` files, and never allows a scope equal
   to the `frames/` or `sources/` root.
-- `GET /api/v2/catalog`: source types with their card type, fence language, `hasScripts` and
-  default size/timeout, plus the HTTP methods and the allowed mongo operations. `POST
-  /api/v2/validate` `{sourceType, code}`: the code rule of the type (`problem` = null when ok).
-  The editor loads the catalog at boot and keeps no local copies of these definitions.
+- `GET /api/v2/catalog`: the source types with their subtypes (card type, fence language, form
+  and default size/timeout per subtype, `hasSources` per type) plus the HTTP methods.
+  `POST /api/v2/validate` `{sourceType, subtype, code}`: the code rule (`problem` = null when
+  ok). The editor loads the catalog at boot and keeps no local copies of these definitions.
 
 ## Example
 
 ````
 frames/active-products-echo/
   step-1/get-active-products.md  active-products.md  assert-active-products.md
-  step-2/echo-payload.md  send-echo.md  send-echo.private.example.md  echo-result.md  assert-echo.md
+  step-2/product-payload.md  create-product.md  created-product.md  assert-created-product.md
 sources/
-  mongo/products-db.md  mongo/products-db/{get-active-products, get-products-by-category}.md
-  swagger/product-api.md  swagger/product-api.private.example.md
-
-# frames/active-products-echo/step-1/flow.md
--------------------
--------------------
-get-active-products
-active-products
-assert-active-products
+  mongo/products-db.md  openapi/product-api.md
 
 # frames/active-products-echo/step-1/get-active-products.md
 -------------------
 title: Get active products
 source: mongo/products-db
-script: getActiveProducts
+subtype: find
 timeout: 5000
 -------------------
+```json
+{ "collection": "products", "filter": { "ativo": true } }
+```
 
-# frames/active-products-echo/step-1/assert-active-products.md
+# frames/active-products-echo/step-2/create-product.md
 -------------------
-title: Assert active products
-source: assert/assertions-core
-timeout: 1000
+title: Create product copy
+source: openapi/product-api
+subtype: restapi
+endpoint: POST /api/products
+openapi-id: create
+timeout: 8000
+size: 360x300
 -------------------
-```jsonassert
-assert $count(activeProducts) > 0
+
+# frames/active-products-echo/step-2/created-product.md
+-------------------
+title: Created product
+source: rawvalue
+subtype: json
+timeout: 2000
+-------------------
+```json
+{ "id": "", "nome": "", "categoria": "", "preco": 0, "ativo": false }
 ```
 
 # sources/mongo/products-db.md
@@ -226,3 +304,6 @@ base-url: mongodb://localhost:27017/products
 
 - The client shows one frame at a time: the one named in the header, or the first one on
   disk. Saving writes only that frame.
+- The framework server serves the OpenAPI spec of its own in-test targets
+  (`/api/v2/openapi.json`: `POST /api/v2/echo`, `GET /api/v2/health`), so an openapi source can
+  point at it (the smoke run does).

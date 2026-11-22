@@ -5,7 +5,7 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * Naming rules of a project. Var-names and script names are camelCase and live on disk as
+ * Naming rules of a project. Var-names are camelCase and live on disk as
  * their kebab-case file name ({@code getActiveProducts} ↔ {@code get-active-products.md}), so
  * a name is storable only when it survives that round trip (no consecutive capitals).
  */
@@ -65,7 +65,7 @@ public final class Names {
         return normalizeVarName(name).equals(name);
     }
 
-    /** Problem with a camelCase name (var-name, script name), or {@code null} when it is storable. */
+    /** Problem with a camelCase name (var-name), or {@code null} when it is storable. */
     public static String camelNameProblem(String what, String name) {
         if (name == null || name.length() < 2) {
             return what + " too short";
@@ -86,6 +86,9 @@ public final class Names {
         }
         if (!SOURCE_NAME.matcher(name).matches()) {
             return "use letters, digits, dot, hyphen and underscore";
+        }
+        if (name.endsWith(".cache") || name.endsWith(".private")) {
+            return "must not end with .cache or .private (reserved file suffixes)";
         }
         return null;
     }

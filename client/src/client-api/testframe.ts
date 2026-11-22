@@ -7,6 +7,7 @@ import {
   framesLoadResponseSchema,
   framesSaveResponseSchema,
   healthResponseSchema,
+  openApiSpecSchema,
   projectSummarySchema,
   sourcesLoadResponseSchema,
   validateResponseSchema
@@ -23,6 +24,7 @@ export type {
   FramesLoadResponse,
   FramesSaveResponse,
   HealthResponse,
+  OpenApiSpec,
   ProjectSummary,
   SourcesLoadResponse,
   ValidateResponse
@@ -41,12 +43,23 @@ const call = <T>(schema: ZodType<T>, path: string, init?: RequestInit): Promise<
 export const testframeApi = {
   health: () => call(healthResponseSchema, '/api/v2/health'),
 
-  // Source types, card types, fence language, defaults, HTTP methods and mongo ops (Phase 2)
+  // Source types with their subtypes: card type, fence language, form, defaults; HTTP methods
   loadCatalog: () => call(catalogResponseSchema, '/api/v2/catalog'),
 
-  // The server's code rule for a source type (null = acceptable)
-  validateCode: (sourceType: string, code: string) =>
-    call(validateResponseSchema, '/api/v2/validate', json('POST', { sourceType, code })).then((r) => r.problem ?? null),
+  // The server's code rule for a (type, subtype) (null = acceptable)
+  validateCode: (sourceType: string, subtype: string | undefined, code: string) =>
+    call(validateResponseSchema, '/api/v2/validate', json('POST', { sourceType, subtype: subtype ?? null, code }))
+      .then((r) => r.problem ?? null),
+
+  // The cached operations of an openapi source ({name}.cache.md; fetched once when missing)
+  loadOperations: (project: string, source: string) =>
+    call(openApiSpecSchema, `/api/v2/sources/openapi/${encodeURIComponent(source)}/operations?project=${encodeURIComponent(project)}`),
+
+  // Fetches the source's spec again and rewrites its cache
+  refreshOperations: (project: string, source: string) =>
+    call(openApiSpecSchema,
+      `/api/v2/sources/openapi/${encodeURIComponent(source)}/operations/refresh?project=${encodeURIComponent(project)}`,
+      json('POST', {})),
 
   listProjects: () => call(projectSummarySchema.array(), '/api/v2/projects'),
 
@@ -54,7 +67,7 @@ export const testframeApi = {
   saveFrames: (project: string, frame: FrameData) =>
     call(framesSaveResponseSchema, '/api/v2/frames', json('POST', { project, frame })),
 
-  // Stores a card's last run next to it ({var-file}.result-data.md, gitignored)
+  // Stores a card's last run next to it ({var-file}.cache.md, gitignored)
   saveResult: (project: string, frame: string, step: number, varName: string, result: CardRunResult) =>
     call(framesSaveResponseSchema, '/api/v2/frames/results', json('POST', { project, frame, step, varName, result })),
 

@@ -1,7 +1,8 @@
 package com.testframe.server.controller;
 
+import com.testframe.server.openapi.OpenApiService;
 import com.testframe.server.runner.HttpRequestRunner;
-import com.testframe.server.runner.MongoScriptRunner;
+import com.testframe.server.runner.MongoRunner;
 import com.testframe.server.service.LocalServerUrl;
 import com.testframe.server.service.RunService;
 import com.testframe.server.service.SourceService;
@@ -28,10 +29,12 @@ class RunnerControllerTest {
 
     private MockMvc mvc() {
         SourceService sources = new SourceService(new ProjectFileStore(root.toString()));
-        RunService runs = new RunService(new MongoScriptRunner(), sources, new JsonataAssertionService(),
+        RunService runs = new RunService(new MongoRunner(), sources, new OpenApiService(sources, url -> {
+            throw new java.io.IOException("offline");
+        }), new JsonataAssertionService(),
                 new HttpRequestRunner(), JsonMapper.builder().build());
         return MockMvcBuilders
-                .standaloneSetup(new RunnerController(new MongoScriptRunner(), sources, runs, new LocalServerUrl()))
+                .standaloneSetup(new RunnerController(new MongoRunner(), sources, runs, new LocalServerUrl()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -40,8 +43,8 @@ class RunnerControllerTest {
     void runsAFrameAndReturnsResultsAndVars() throws Exception {
         mvc().perform(post("/api/v2/run").contentType(MediaType.APPLICATION_JSON).content("""
                 {"project": "demo", "frame": "flow", "steps": [{"number": 1, "cards": [
-                  {"varName": "seed", "title": "Seed", "sourceType": "inline", "code": "{\\"n\\": 1}"},
-                  {"varName": "copy", "title": "Copy", "sourceType": "inline", "code": "{\\"v\\": \\"{{seed.n}}\\"}"}]}]}
+                  {"varName": "seed", "title": "Seed", "sourceType": "rawvalue", "subtype": "json", "code": "{\\"n\\": 1}"},
+                  {"varName": "copy", "title": "Copy", "sourceType": "rawvalue", "subtype": "json", "code": "{\\"v\\": \\"{{seed.n}}\\"}"}]}]}
                 """))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.frame").value("flow"))

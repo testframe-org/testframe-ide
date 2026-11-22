@@ -32,11 +32,11 @@ public class ProjectFileStore {
         this.root = Path.of(projectsDir).toAbsolutePath().normalize();
     }
 
-    /** Versioned templates for private files ({@code <name>.private.example.md}): never pruned by a save. */
-    public static final String PRIVATE_EXAMPLE_SUFFIX = CardCodec.PRIVATE_EXAMPLE_SUFFIX;
-
-    /** Last run of a card ({var-file}.result-data.md): kept while its card exists, never versioned. */
-    public static final String RESULT_SUFFIX = CardCodec.RESULT_SUFFIX;
+    /**
+     * Generated local files ({@code *.cache.md}: a card's last run, an openapi source's spec):
+     * a card's cache is kept while its card exists; none is ever versioned.
+     */
+    public static final String CACHE_SUFFIX = CardCodec.CACHE_SUFFIX;
 
     public Map<String, Object> save(String project, String subDir, List<ProjectFile> files) throws IOException {
         return replace(project, subDir, List.of(), List.of(), files);
@@ -48,7 +48,6 @@ public class ProjectFileStore {
      * holding exactly what was sent. Scopes are relative to {@code subDir} and must be strict
      * sub-directories of it (a scope can never wipe the whole frames/sources tree).
      * {@code staleFiles} are single files (outside the scopes) deleted unless they were sent.
-     * {@code *.private.example.md} templates are never deleted.
      */
     public Map<String, Object> replace(String project, String subDir, Collection<String> scopes,
                                        Collection<String> staleFiles, List<ProjectFile> files) throws IOException {
@@ -93,7 +92,7 @@ public class ProjectFileStore {
             removed += prune(scopeDir, targets.keySet());
         }
         for (Path stale : stalePaths) {
-            if (!targets.containsKey(stale) && !isPrivateExample(stale) && Files.deleteIfExists(stale)) {
+            if (!targets.containsKey(stale) && Files.deleteIfExists(stale)) {
                 removed++;
             }
         }
@@ -112,7 +111,7 @@ public class ProjectFileStore {
             all = walk.sorted(Comparator.reverseOrder()).toList(); // children before parents
         }
         for (Path p : all) {
-            if (Files.isRegularFile(p) && p.toString().endsWith(".md") && !keep.contains(p) && !isPrivateExample(p)
+            if (Files.isRegularFile(p) && p.toString().endsWith(".md") && !keep.contains(p)
                     && !isResultOfKeptCard(p, keep)) {
                 Files.delete(p);
                 removed++;
@@ -126,31 +125,29 @@ public class ProjectFileStore {
     /** A result file survives a replace only while its card file ({var-file}.md) is kept. */
     private static boolean isResultOfKeptCard(Path p, Set<Path> keep) {
         String name = p.getFileName().toString();
-        return name.endsWith(RESULT_SUFFIX)
-                && keep.contains(p.resolveSibling(name.substring(0, name.length() - RESULT_SUFFIX.length()) + ".md"));
+        return name.endsWith(CACHE_SUFFIX)
+                && keep.contains(p.resolveSibling(name.substring(0, name.length() - CACHE_SUFFIX.length()) + ".md"));
     }
 
     /**
-     * Writes a card's last-run file and makes sure the project's testframe/.gitignore ignores
-     * result files (they are local run output, not test definitions).
+     * Writes a generated {@code *.cache.md} file under {@code subDir} (a card's last run under
+     * testframe/frames, an openapi spec under testframe/sources) and makes sure the project's
+     * testframe/.gitignore ignores cache files (local output, not test definitions).
      */
-    public Map<String, Object> saveResult(String project, String relativePath, String content) throws IOException {
-        if (relativePath == null || !relativePath.endsWith(RESULT_SUFFIX)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Result files must end with " + RESULT_SUFFIX);
+    public Map<String, Object> saveCache(String project, String subDir, String relativePath, String content)
+            throws IOException {
+        if (relativePath == null || !relativePath.endsWith(CACHE_SUFFIX)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Cache files must end with " + CACHE_SUFFIX);
         }
-        Map<String, Object> saved = save(project, "testframe/frames", List.of(new ProjectFile(relativePath, content)));
+        Map<String, Object> saved = save(project, subDir, List.of(new ProjectFile(relativePath, content)));
         Path gitignore = resolve(project).resolve("testframe/.gitignore");
-        String pattern = "*" + RESULT_SUFFIX;
+        String pattern = "*" + CACHE_SUFFIX;
         String current = Files.exists(gitignore) ? Files.readString(gitignore, StandardCharsets.UTF_8) : "";
         if (current.lines().noneMatch(line -> line.trim().equals(pattern))) {
-            String header = current.isEmpty() ? "# Local run output of the editor (last result of each card)\n" : "\n";
+            String header = current.isEmpty() ? "# Generated local files: last run of each card, openapi spec caches\n" : "\n";
             Files.writeString(gitignore, current + header + pattern + "\n", StandardCharsets.UTF_8);
         }
         return saved;
-    }
-
-    private static boolean isPrivateExample(Path p) {
-        return p.getFileName().toString().endsWith(PRIVATE_EXAMPLE_SUFFIX);
     }
 
     private static boolean isEmpty(Path directory) throws IOException {
@@ -222,7 +219,7 @@ public class ProjectFileStore {
         }
     }
 
-    /** Sources are the {type}/{name}.md files (not private files nor scripts). */
+    /** Sources are the {type}/{name}.md files (not private nor cache files). */
     private static int countMd(Path sources) throws IOException {
         if (!Files.isDirectory(sources)) {
             return 0;
@@ -231,7 +228,7 @@ public class ProjectFileStore {
             return (int) walk.filter(Files::isRegularFile)
                     .filter(p -> sources.relativize(p).getNameCount() == 2)
                     .map(p -> p.getFileName().toString())
-                    .filter(n -> n.endsWith(".md") && !n.contains(".private."))
+                    .filter(n -> n.endsWith(".md") && !n.endsWith(".private.md") && !n.endsWith(CACHE_SUFFIX))
                     .count();
         }
     }

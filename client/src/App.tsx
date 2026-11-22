@@ -144,15 +144,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
         return;
       }
 
-      // Silent auto-load of persisted sources and frames (sources first: cards may
-      // inherit their body from a source script)
-      let loadedSources: SourceDef[] = [];
+      // Silent auto-load of persisted sources and frames (invalid source files are reported)
       try {
         const data = await testframeApi.loadSources(project);
-        if (data.sources?.length) {
-          loadedSources = data.sources;
-          setSources(loadedSources);
-        }
+        if (data.sources?.length) setSources(data.sources);
+        data.errors.forEach((e) => pushFrameMsg(e, 'error'));
       } catch {
         /* no saved sources yet */
       }
@@ -440,11 +436,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  // Stores a card's last run next to it (frames/{frame}/step-{n}/{var-file}.result-data.md,
+  // Stores a card's last run next to it (frames/{frame}/step-{n}/{var-file}.cache.md,
   // gitignored by the server). Best effort: a failure is only logged.
   const persistResult = (step: Step, card: Card, result: CardRunResult) => {
     const varName = cardVarName(card);
-    const path = `${slug(frameName)}/step-${step.number}/${varNameToFileName(varName)}.result-data.md`;
+    const path = `${slug(frameName)}/step-${step.number}/${varNameToFileName(varName)}.cache.md`;
     testframeApi
       .saveResult(slug(projectName), frameName, step.number, varName, result)
       .catch((err: Error) => pushFrameMsg(t('resultSaveFail', { path, msg: err.message }), 'error'));
@@ -489,7 +485,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
             status: outcome.status, text: outcome.text, output: outcome.output, at: outcome.at, ranAt: outcome.ranAt
           };
           runs[card.id] = result;
-          logs.push({ time: result.at, text: result.text, type: result.status === 'error' ? 'error' : 'success' });
+          logs.push({
+            time: result.at,
+            text: result.text,
+            type: result.status === 'error' ? 'error' : result.status === 'skipped' ? 'info' : 'success'
+          });
           persistResult(step, card, result);
           // The server rewrote this card's body (the JSON card that received a response)
           return outcome.code != null ? { ...card, status: result.status, code: outcome.code } : { ...card, status: result.status };
@@ -982,6 +982,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
       <CardEditModal
         selectedContext={editorContext}
         sources={sources}
+        project={slug(projectName)}
         onClose={closeEditor}
         onRun={runCard}
         running={isRunning}
