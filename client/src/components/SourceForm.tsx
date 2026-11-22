@@ -28,8 +28,8 @@ const editorCls =
 
 // Placeholder of a mongo body per subtype (find / aggregation)
 const MONGO_PLACEHOLDER: Record<string, string> = {
-  find: '{ "collection": "products", "filter": { "ativo": true } }',
-  aggregation: '{ "collection": "products", "pipeline": [{ "$match": { "ativo": true } }] }'
+  find: '{ "filter": { "ativo": true } }',
+  aggregation: '{ "pipeline": [{ "$match": { "ativo": true } }] }'
 };
 
 function Label({ children }: { children: React.ReactNode }) {

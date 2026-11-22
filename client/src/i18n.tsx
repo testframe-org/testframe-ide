@@ -156,6 +156,7 @@ const en = {
   operationNeedsSource: 'Choose the name-source: its OpenAPI spec lists the operations.',
   operationMoved: 'The spec moved this operation: {endpoint} is now {current} (pick it again to update)',
   mongoBodyLabel: 'Mongo {subtype} (JSON, supports {{bindings}})',
+  collectionRequired: 'Required: the collection the query reads (no $, not system.*)',
   openapiSourceHint: 'base-url is the OpenAPI spec (JSON); saving caches its operations in {name}.cache.md.',
   varNameField: 'Variable name (var-name)'
 } as const;
@@ -309,6 +310,7 @@ const pt: Record<TKey, string> = {
   operationNeedsSource: 'Escolha a name-source: a spec OpenAPI dela lista as operações.',
   operationMoved: 'A spec moveu esta operação: {endpoint} agora é {current} (escolha de novo para atualizar)',
   mongoBodyLabel: 'Mongo {subtype} (JSON, aceita {{bindings}})',
+  collectionRequired: 'Obrigatório: a collection que a query lê (sem $, não system.*)',
   openapiSourceHint: 'base-url é a spec OpenAPI (JSON); salvar guarda as operações em {name}.cache.md.',
   varNameField: 'Nome da variável (var-name)'
 };

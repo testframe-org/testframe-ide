@@ -421,8 +421,8 @@ public class RunService {
         }
         long began = System.nanoTime();
         try {
-            MongoQuery query = MongoQuery.parse(subtype,
-                    json.writeValueAsString(Bindings.substitute(parse(code), vars, json)));
+            String body = Names.isBlank(code) ? "" : json.writeValueAsString(Bindings.substitute(parse(code), vars, json));
+            MongoQuery query = MongoQuery.parse(subtype, card.collection(), body);
             String uri = sources.baseUrl(project, "mongo", card.sourceName());
             Map<String, Object> envelope = json.readValue(mongo.run(uri, query, timeout), MAP);
             Object value = envelope.get("result");

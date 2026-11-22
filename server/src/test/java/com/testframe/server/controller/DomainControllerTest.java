@@ -48,12 +48,12 @@ class DomainControllerTest {
     @Test
     void validateReturnsTheCodeRuleProblemOrNull() throws Exception {
         mvc.perform(post("/api/v2/validate").contentType("application/json")
-                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"aggregation\", \"code\": \"{\\\"collection\\\": \\\"x\\\", \\\"pipeline\\\": [{\\\"$out\\\": \\\"y\\\"}]}\"}"))
+                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"aggregation\", \"code\": \"{\\\"pipeline\\\": [{\\\"$out\\\": \\\"y\\\"}]}\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.problem").value("write stage \"$out\" is not allowed (mongo cards are read-only)"));
 
         mvc.perform(post("/api/v2/validate").contentType("application/json")
-                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"find\", \"code\": \"{\\\"collection\\\": \\\"products\\\"}\"}"))
+                        .content("{\"sourceType\": \"mongo\", \"subtype\": \"find\", \"code\": \"{\\\"filter\\\": {}}\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.problem").doesNotExist());
 

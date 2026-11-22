@@ -27,7 +27,8 @@ class CardCodecTest {
             case "rawvalue" -> "json";
             default -> null;
         };
-        return new Card(varName, "Title of " + varName, null, sourceType, subtype, sourceName, "", null, null,
+        return new Card(varName, "Title of " + varName, null, sourceType, subtype,
+                "mongo".equals(sourceType) ? "products" : null, sourceName, "", null, null,
                 null, null, null, null, code, null, null);
     }
 
@@ -59,7 +60,8 @@ class CardCodecTest {
         assertEquals("query", getActive.type());
         assertEquals("mongo", getActive.sourceType());
         assertEquals("find", getActive.subtype());
-        assertEquals("{ \"collection\": \"products\", \"filter\": { \"ativo\": true } }", getActive.code(),
+        assertEquals("products", getActive.collection());
+        assertEquals("{ \"filter\": { \"ativo\": true } }", getActive.code(),
                 "the card holds its own code");
         Card activeProducts = frame.steps().getFirst().cards().get(1);
         assertEquals("rawvalue", activeProducts.sourceType(), "every card declares its type-source");
@@ -98,7 +100,7 @@ class CardCodecTest {
                 {}
                 ```
                 """, json);
-        Card big = new Card("sendIt", " ", null, "openapi", "restapi", "api", " POST /x ", null, null,
+        Card big = new Card("sendIt", " ", null, "openapi", "restapi", null, "api", " POST /x ", null, null,
                 8000, 360, 300, 120, "", null, null);
         assertEquals("""
                 -------------------
@@ -152,7 +154,7 @@ class CardCodecTest {
         assertEquals(List.of("source: unknown type-source"),
                 CardCodec.validate(Map.of("title", "A", "source", "ftp/x")));
         assertEquals(List.of("script: sources have no scripts; the card holds its own code"),
-                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find", "script", "getAll")),
+                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find", "collection", "x", "script", "getAll")),
                 "source scripts were removed: a card always holds its own code");
         assertEquals(List.of("timeout: must be <= 120000", "size: size must be {width}x{height}", "result-height: must be >= 24"),
                 CardCodec.validate(Map.of("title", "A", "source", "rawvalue", "subtype", "json", "timeout", "999999", "size", "big", "result-height", "3")));
@@ -162,9 +164,9 @@ class CardCodecTest {
     @Test
     void subtypeIsRequiredExactlyForTypesWithSubtypes() {
         assertEquals(List.of("subtype: required for mongo (find, aggregation)"),
-                CardCodec.validate(Map.of("title", "A", "source", "mongo/db")));
+                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "collection", "x")));
         assertEquals(List.of("subtype: unknown subtype \"update\" of mongo (find, aggregation)"),
-                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "update")));
+                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "update", "collection", "x")));
         assertEquals(List.of("subtype: unknown subtype \"find\" of rawvalue (json)"),
                 CardCodec.validate(Map.of("title", "A", "source", "rawvalue", "subtype", "find")));
         assertEquals(List.of("subtype: required for rawvalue (json)"),
@@ -176,7 +178,7 @@ class CardCodecTest {
 
     @Test
     void openapiCardsNameTheirOperationById() {
-        Card create = new Card("createProduct", "Create", null, "openapi", "restapi", "product-api", "POST /api/products",
+        Card create = new Card("createProduct", "Create", null, "openapi", "restapi", null, "product-api", "POST /api/products",
                 "create", null, null, null, null, null, "", null, null);
         String md = CardCodec.render(create);
         assertEquals("""
@@ -191,9 +193,32 @@ class CardCodecTest {
                 """, md);
         assertEquals("create", CardCodec.parse("create-product", md).card().openapiId());
         assertEquals(List.of("openapi-id: only openapi cards name a spec operation"),
-                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find", "openapi-id", "create")));
+                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find", "collection", "x", "openapi-id", "create")));
         assertEquals(List.of("openapi-id: must be the spec's operationId (letters, digits, _ . -)"),
                 CardCodec.validate(Map.of("title", "A", "source", "openapi/api", "subtype", "restapi", "openapi-id", "a b")));
+    }
+
+    @Test
+    void mongoCardsNameTheirCollection() {
+        Card find = new Card("getAll", "Get all", null, "mongo", "find", "products", "db", "", null, null,
+                null, null, null, null, "{ \"filter\": {} }", null, null);
+        String md = CardCodec.render(find);
+        assertTrue(md.startsWith("""
+                -------------------
+                title: Get all
+                source: mongo/db
+                subtype: find
+                collection: products
+                timeout: 5000
+                -------------------
+                """), md);
+        assertEquals("products", CardCodec.parse("get-all", md).card().collection());
+        assertEquals(List.of("collection: required on mongo cards (the collection the query reads)"),
+                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find")));
+        assertEquals(List.of("collection: system collections cannot be queried"),
+                CardCodec.validate(Map.of("title", "A", "source", "mongo/db", "subtype", "find", "collection", "system.users")));
+        assertEquals(List.of("collection: only mongo cards name a collection"),
+                CardCodec.validate(Map.of("title", "A", "source", "rawvalue", "subtype", "json", "collection", "x")));
     }
 
     @Test
@@ -202,7 +227,7 @@ class CardCodecTest {
                 CardCodec.validate(Map.of("title", "A", "source", "jsonassert/rules", "subtype", "script")));
         assertEquals(List.of("source: rawvalue cards have no name-source (write source: rawvalue)"),
                 CardCodec.validate(Map.of("title", "A", "source", "rawvalue/x", "subtype", "json")));
-        Card check = new Card("check", "Check", null, "jsonassert", "script", "", "", null, null,
+        Card check = new Card("check", "Check", null, "jsonassert", "script", null, "", "", null, null,
                 null, null, null, null, "assert x == 1", null, null);
         assertEquals("""
                 -------------------
@@ -256,7 +281,7 @@ class CardCodecTest {
         e = assertThrows(FormatException.class, () -> FrameCodec.write(lossy));
         assertEquals("var-name \"getHTTPData\" cannot be stored; use \"getHttpdata\"", e.getMessage());
 
-        Card badTimeout = new Card("slow", "Slow", null, "rawvalue", "json", "", "", null, null, 50, null, null, null, "", null, null);
+        Card badTimeout = new Card("slow", "Slow", null, "rawvalue", "json", null, "", "", null, null, 50, null, null, null, "", null, null);
         e = assertThrows(FormatException.class,
                 () -> FrameCodec.write(new Frame("Main", List.of(new Step(1, List.of(badTimeout))))));
         assertEquals("step 1 \"Slow\": timeout: must be >= 100", e.getMessage());
@@ -264,7 +289,7 @@ class CardCodecTest {
 
     @Test
     void frameWriteNumbersStepsAndCardsByPositionAndDerivesMissingVarNames() {
-        Card untitledVar = new Card(null, "Echo payload", null, "rawvalue", "json", null, null, null, null, null, null, null, null,
+        Card untitledVar = new Card(null, "Echo payload", null, "rawvalue", "json", null, null, null, null, null, null, null, null, null,
                 "{}", "secret", null);
         FrameCodec.Written written = FrameCodec.write(new Frame("My Flow", List.of(
                 new Step(7, List.of(card("first", "rawvalue", "", "1"), untitledVar)))));

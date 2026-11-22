@@ -141,7 +141,10 @@ export function CardEditModal({
                     // without named sources keep none)
                     const firstSource = hasSources(next) ? sources.find((s) => s.typeSource === next)?.name ?? '' : '';
                     const only = subtypesOf(next).length === 1 ? subtypesOf(next)[0] : undefined;
-                    update({ sourceType: next, subtype: only, type: cardTypeOf(next, only), sourceName: firstSource, openapiId: undefined });
+                    update({
+                      sourceType: next, subtype: only, type: cardTypeOf(next, only), sourceName: firstSource,
+                      openapiId: undefined, collection: undefined
+                    });
                   }}
                   className={`${inputCls} ${card.sourceType ? '' : 'ring-2 ring-blue-500/40 border-blue-500'}`}
                 >
@@ -189,6 +192,19 @@ export function CardEditModal({
                         <option key={s.name} value={s.name}>{s.name}</option>
                       ))}
                   </select>
+                </div>
+              )}
+              {sourceType === 'mongo' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">collection</label>
+                  <input
+                    type="text"
+                    value={card.collection ?? ''}
+                    onChange={(e) => update({ collection: e.target.value || undefined })}
+                    placeholder="products"
+                    className={`${inputCls} ${card.collection ? '' : 'ring-2 ring-blue-500/40 border-blue-500'}`}
+                  />
+                  {!card.collection && <p className="mt-1 text-[11px] text-slate-500">{t('collectionRequired')}</p>}
                 </div>
               )}
             </div>

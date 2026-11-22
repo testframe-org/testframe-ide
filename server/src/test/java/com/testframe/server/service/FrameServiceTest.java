@@ -34,7 +34,8 @@ class FrameServiceTest {
     Path root;
 
     private Card card(String varName, String sourceType, String sourceName, String code) {
-        return new Card(varName, varName, null, sourceType, "mongo".equals(sourceType) ? "find" : "rawvalue".equals(sourceType) ? "json" : null, sourceName, "", null, null,
+        return new Card(varName, varName, null, sourceType, "mongo".equals(sourceType) ? "find" : "rawvalue".equals(sourceType) ? "json" : null,
+                "mongo".equals(sourceType) ? "x" : null, sourceName, "", null, null,
                 null, null, null, null, code, null, null);
     }
 
@@ -52,12 +53,12 @@ class FrameServiceTest {
         sources.save("demo", List.of(new Source("mongo", "db", "mongodb://localhost/x", "")));
 
         frames.save("demo", new Frame("Main Flow", List.of(new Step(1, List.of(
-                card("getAll", "mongo", "db", "{\"collection\": \"x\"}").withPrivateData("token: t"),
+                card("getAll", "mongo", "db", "{}").withPrivateData("token: t"),
                 card("payload", "rawvalue", "", "{}"))))));
         frames.saveResult("demo", "Main Flow", 1, "getAll", new CardRun("success", "ok", "[]", "0.1s", "2026-11-21T00:00:00Z"));
 
         Path card = root.resolve("demo/testframe/frames/main-flow/step-1/get-all.md");
-        assertTrue(Files.readString(card).endsWith("-------------------\n```json\n{\"collection\": \"x\"}\n```\n"),
+        assertTrue(Files.readString(card).endsWith("-------------------\n```json\n{}\n```\n"),
                 "the card holds its own code");
         assertTrue(Files.exists(card.resolveSibling("get-all.private.md")));
         assertTrue(Files.exists(card.resolveSibling("get-all.cache.md")));
@@ -67,7 +68,7 @@ class FrameServiceTest {
         FramesResponse loaded = frames.load("demo");
         assertEquals(List.of(), loaded.errors());
         Card getAll = loaded.frames().getFirst().steps().getFirst().cards().getFirst();
-        assertEquals("{\"collection\": \"x\"}", getAll.code());
+        assertEquals("{}", getAll.code());
         assertEquals("find", getAll.subtype());
         assertEquals("token: t", getAll.privateData());
         assertEquals("success", getAll.lastRun().status());
@@ -106,8 +107,8 @@ class FrameServiceTest {
         // Phase 2: the code rules per source type are enforced on both saves
         mvc.perform(post("/api/v2/frames").contentType("application/json").content("""
                         {"project": "demo", "frame": {"name": "main", "steps": [{"number": 1, "cards": [
-                          {"varName": "q", "title": "Q", "sourceType": "mongo", "subtype": "aggregation", "sourceName": "db",
-                           "code": "{\\"collection\\": \\"x\\", \\"pipeline\\": [{\\"$merge\\": \\"y\\"}]}"}]}]}}
+                          {"varName": "q", "title": "Q", "sourceType": "mongo", "subtype": "aggregation", "collection": "x", "sourceName": "db",
+                           "code": "{\\"pipeline\\": [{\\"$merge\\": \\"y\\"}]}"}]}]}}
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("step 1 \"Q\": code: write stage \"$merge\" is not allowed (mongo cards are read-only)"));
@@ -120,7 +121,8 @@ class FrameServiceTest {
                         """))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("step 1 \"A\": source: required ({type-source}/{name-source}, or rawvalue); "
-                        + "step 1 \"B\": subtype: required for mongo (find, aggregation)"));
+                        + "step 1 \"B\": subtype: required for mongo (find, aggregation); "
+                        + "step 1 \"B\": collection: required on mongo cards (the collection the query reads)"));
 
         mvc.perform(post("/api/v2/sources").contentType("application/json").content("""
                         {"project": "demo", "sources": [{"typeSource": "jsonassert", "name": "rules"}]}

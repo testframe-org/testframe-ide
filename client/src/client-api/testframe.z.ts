@@ -38,6 +38,7 @@ export const cardSchema = z.object({
   code: z.string(),
   sourceType: z.string(), // type-source: every saved card declares one ('rawvalue' when it has no source)
   subtype: z.string().optional(), // set when the type has subtypes (e.g. mongo: find | aggregation)
+  collection: z.string().optional(), // mongo cards: the collection the query reads (frontmatter collection:)
   sourceName: z.string(),
   resultHeight: z.number().optional(), // px of the last-run panel under the script (absent = default)
   privateData: z.string().optional(), // body of {var-file}.private.md (gitignored; absent file = none)
@@ -119,6 +120,7 @@ export const cardDataSchema = z.object({
   type: z.string(),
   sourceType: z.string(),
   subtype: z.string().nullish(),
+  collection: z.string().nullish(),
   sourceName: z.string(),
   endpoint: z.string(),
   openapiId: z.string().nullish(),

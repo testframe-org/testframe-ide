@@ -12,23 +12,24 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * The body of a mongo card: one JSON object whose shape follows the card's subtype
- * (spec: docs/project-format.md, "Mongo body").
+ * A mongo card's query: the collection (the card's {@code collection:} frontmatter) and its
+ * body, one JSON object whose shape follows the card's subtype (spec: docs/project-format.md,
+ * "Mongo cards").
  * <pre>
- *   find:        {"collection": "products", "filter": {...}, "projection": {...}, "sort": {...}, "limit": 10, "skip": 0}
- *   aggregation: {"collection": "products", "pipeline": [{"$match": {...}}, ...]}
+ *   find:        {"filter": {...}, "projection": {...}, "sort": {...}, "limit": 10, "skip": 0}  (all optional)
+ *   aggregation: {"pipeline": [{"$match": {...}}, ...]}
  * </pre>
- * {@code collection} is required, the other find keys are optional, {@code pipeline} is required
- * for aggregations; unknown keys and write stages ({@code $out}, {@code $merge}) are rejected.
- * Values use JSON (MongoDB extended JSON such as {"$oid": "..."} is understood).
+ * Unknown keys (including {@code collection}, which lives in the frontmatter) and write stages
+ * ({@code $out}, {@code $merge}) are rejected. Values use JSON (MongoDB extended JSON such as
+ * {"$oid": "..."} is understood).
  */
 public record MongoQuery(String subtype, String collection, BsonDocument filter, BsonDocument projection,
                          BsonDocument sort, Integer limit, Integer skip, List<BsonDocument> pipeline) {
 
     public static final String FIND = "find";
     public static final String AGGREGATION = "aggregation";
-    public static final List<String> FIND_KEYS = List.of("collection", "filter", "projection", "sort", "limit", "skip");
-    public static final List<String> AGGREGATION_KEYS = List.of("collection", "pipeline");
+    public static final List<String> FIND_KEYS = List.of("filter", "projection", "sort", "limit", "skip");
+    public static final List<String> AGGREGATION_KEYS = List.of("pipeline");
     public static final List<String> WRITE_STAGES = List.of("$out", "$merge");
 
     private static final JsonMapper STRICT = JsonMapper.builder().build();
@@ -54,12 +55,39 @@ public record MongoQuery(String subtype, String collection, BsonDocument filter,
         }
     }
 
-    /** Parses a body whose bindings are already resolved; throws IllegalArgumentException with the reason. */
-    public static MongoQuery parse(String subtype, String json) {
+    /**
+     * Problem of a collection name (the card's {@code collection:}), or null: non-empty, no
+     * {@code $}, no null character, not a {@code system.} collection.
+     */
+    public static String collectionProblem(String collection) {
+        if (collection == null || collection.isBlank()) {
+            return "required on mongo cards (the collection the query reads)";
+        }
+        if (!collection.equals(collection.trim()) || collection.contains("$") || collection.indexOf('\0') >= 0) {
+            return "\"" + collection + "\" is not a collection name (no $, no spaces around, no null character)";
+        }
+        if (collection.startsWith("system.")) {
+            return "system collections cannot be queried";
+        }
+        return null;
+    }
+
+    /**
+     * Parses a card's query: its {@code collection} and a body whose bindings are already
+     * resolved (a blank find body means no filter); throws IllegalArgumentException with the reason.
+     */
+    public static MongoQuery parse(String subtype, String collection, String json) {
         if (subtype == null || subtype.isBlank()) {
             throw new IllegalArgumentException("mongo cards need a subtype (" + FIND + ", " + AGGREGATION + ")");
         }
-        return read(subtype, json == null ? "" : json, false);
+        String problem = collectionProblem(collection);
+        if (problem != null) {
+            throw new IllegalArgumentException("collection: " + problem);
+        }
+        String body = json == null || json.isBlank() ? (FIND.equals(subtype) ? "{}" : "") : json;
+        MongoQuery q = read(subtype, body, false);
+        return new MongoQuery(q.subtype(), collection, q.filter(), q.projection(), q.sort(),
+                q.limit(), q.skip(), q.pipeline());
     }
 
     /** {@code lenient}: null values (bindings in the code rule) are accepted for any key. */
@@ -92,18 +120,7 @@ public record MongoQuery(String subtype, String collection, BsonDocument filter,
         if (writeStage != null) {
             throw new IllegalArgumentException("write stage \"" + writeStage + "\" is not allowed (mongo cards are read-only)");
         }
-
-        BsonValue collection = doc.get("collection");
-        if (collection == null) {
-            throw new IllegalArgumentException("collection is required, e.g. " + shapeHint(sub));
-        }
-        if (!collection.isString() && !(lenient && collection.isNull())) {
-            throw new IllegalArgumentException("collection must be a string");
-        }
-        String name = collection.isString() ? collection.asString().getValue() : "";
-        if (!lenient && name.isBlank()) {
-            throw new IllegalArgumentException("collection must not be empty");
-        }
+        String name = null; // the collection comes from the card's frontmatter (see parse)
 
         if (FIND.equals(sub)) {
             return new MongoQuery(sub, name,
@@ -182,7 +199,7 @@ public record MongoQuery(String subtype, String collection, BsonDocument filter,
 
     private static String shapeHint(String subtype) {
         return AGGREGATION.equals(subtype)
-                ? "mongo aggregation bodies are one JSON object: {\"collection\": \"products\", \"pipeline\": [{\"$match\": {\"ativo\": true}}]}"
-                : "mongo find bodies are one JSON object: {\"collection\": \"products\", \"filter\": {\"ativo\": true}}";
+                ? "mongo aggregation bodies are one JSON object: {\"pipeline\": [{\"$match\": {\"ativo\": true}}]}"
+                : "mongo find bodies are one JSON object: {\"filter\": {\"ativo\": true}}";
     }
 }

@@ -13,11 +13,11 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   No other `fetch` calls exist: the editor never executes flow requests itself.
 - `src/components/` — `StepFrame`, `TestBlockCard`, `ConnectorArrow`, `AddBlockCircleButton`,
   `CardEditModal` (opened by a card's Edit button: type-source → subtype (when the type has
-  subtypes; a single one is preselected) → name-source (only for types with named sources) on
-  the left; `SourceForm` on the right once (type, subtype) is complete),
+  subtypes; a single one is preselected) → name-source (only for types with named sources) →
+  collection (mongo cards) on the left; `SourceForm` on the right once (type, subtype) is complete),
   `SourceForm` (the form served by the catalog per (type, subtype): request/swagger with the
   openapi operation select (from the source's cached spec; stores `openapiId` + `endpoint`),
-  mongo (JSON body per subtype), query (sql), script, condition, json, code),
+  mongo (JSON body per subtype; the collection is a card field), query (sql), script, condition, json, code),
   `ExecutionConsole`, `SourcesView` (the Sources tab: source CRUD — type (only types with named
   sources), name, base-url, private data; a source is only its connection)
   , `CodeEditor` (the code textarea of `SourceForm` with a completion popup)

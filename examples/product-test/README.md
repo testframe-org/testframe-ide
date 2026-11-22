@@ -27,8 +27,8 @@ first time the collection is empty.
 
 ## The suite
 
-1. Step 1 runs a `mongo` `find` card (`source: mongo/products-db`, `subtype: find`, JSON body
-   `{ "collection": "products", "filter": { "ativo": true } }`) and publishes the result as the
+1. Step 1 runs a `mongo` `find` card (`source: mongo/products-db`, `subtype: find`,
+   `collection: products`, JSON body `{ "filter": { "ativo": true } }`) and publishes the result as the
    `getActiveProducts` variable; a `rawvalue`/`json` card and a `jsonassert`/`script` card follow.
 2. Step 2 binds `{{getActiveProducts.0.*}}` into a payload and sends it to the product-api
    operation `create` (`POST /api/products`, picked from the `openapi/product-api` source's

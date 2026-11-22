@@ -27,10 +27,10 @@ public class RunnerController {
     /**
      * {@code project} + {@code source}: the mongo source whose file holds the connection
      * ({@code sources/mongo/{source}.md}, frontmatter {@code base-url}); {@code subtype} (find or
-     * aggregation) + {@code body}: the JSON body, e.g. {"collection": "products", "filter":
-     * {"ativo": true}}. Nothing comes from the server's own configuration.
+     * aggregation) + {@code collection} + {@code body}: the JSON body, e.g.
+     * {"filter": {"ativo": true}}. Nothing comes from the server's own configuration.
      */
-    public record MongoRunRequest(String project, String source, String subtype, String body, Long timeoutMs) {
+    public record MongoRunRequest(String project, String source, String subtype, String collection, String body, Long timeoutMs) {
     }
 
     private final MongoRunner mongo;
@@ -59,13 +59,13 @@ public class RunnerController {
 
     @PostMapping(value = "/mongo", produces = MediaType.APPLICATION_JSON_VALUE)
     public String mongo(@RequestBody MongoRunRequest request) throws IOException {
-        if (blank(request.project()) || blank(request.source()) || blank(request.body())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "project, source and body are required");
+        if (blank(request.project()) || blank(request.source()) || blank(request.collection())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "project, source and collection are required");
         }
         MongoQuery query;
         try {
             // the body is validated (read-only, known keys) before the source is even read
-            query = MongoQuery.parse(request.subtype(), request.body());
+            query = MongoQuery.parse(request.subtype(), request.collection(), request.body());
         } catch (IllegalArgumentException e) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage(), e);
         }

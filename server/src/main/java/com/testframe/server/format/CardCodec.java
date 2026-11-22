@@ -28,6 +28,7 @@ public final class CardCodec {
     private static final Pattern SIZE = Pattern.compile("\\d+x\\d+");
     private static final Pattern OPERATION_ID = Pattern.compile("[A-Za-z0-9_.-]+");
     private static final String OPENAPI = "openapi";
+    private static final String MONGO = "mongo";
     private static final Pattern NUMBER = Pattern.compile("[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?");
     private static final Pattern ENDPOINT = Pattern.compile("(GET|POST|PUT|PATCH|DELETE)\\s+(\\S+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern WHITESPACE = Pattern.compile("(?U)\\s+");
@@ -59,6 +60,8 @@ public final class CardCodec {
         fields.put("title", title.isEmpty() ? card.varName() : title);
         fields.put("source", sourceRef(card));
         fields.put("subtype", subtype.isEmpty() ? null : subtype);
+        String collection = card.collection() == null ? "" : card.collection();
+        fields.put("collection", collection.isEmpty() ? null : collection);
         fields.put("endpoint", Names.trim(card.endpoint()));
         String openapiId = Names.trim(card.openapiId());
         fields.put("openapi-id", openapiId.isEmpty() ? null : openapiId);
@@ -97,6 +100,7 @@ public final class CardCodec {
                 type,
                 sourceType,
                 subtype,
+                f.get("collection"),
                 sourceName,
                 endpoint,
                 f.get("openapi-id"),
@@ -138,6 +142,15 @@ public final class CardCodec {
             if (problem != null) {
                 errors.add("subtype: " + problem);
             }
+        }
+        String collection = f.get("collection");
+        if (MONGO.equals(sourceType)) {
+            String problem = MongoQuery.collectionProblem(collection);
+            if (problem != null) {
+                errors.add("collection: " + problem);
+            }
+        } else if (collection != null && sourceType != null) {
+            errors.add("collection: only mongo cards name a collection");
         }
         String openapiId = f.get("openapi-id");
         if (openapiId != null && sourceType != null && !OPENAPI.equals(sourceType)) {

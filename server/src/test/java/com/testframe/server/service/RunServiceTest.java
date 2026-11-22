@@ -50,12 +50,12 @@ class RunServiceTest {
     private String echoBase;
 
     private static Card card(String varName, String sourceType, String code) {
-        return new Card(varName, varName, null, sourceType, "rawvalue".equals(sourceType) ? "json" : null, "", "", null, null,
+        return new Card(varName, varName, null, sourceType, "rawvalue".equals(sourceType) ? "json" : null, null, "", "", null, null,
                 null, null, null, null, code, null, null);
     }
 
     private static Card request(String varName, String endpoint) {
-        return new Card(varName, varName, null, "openapi", "restapi", "", endpoint, null, null,
+        return new Card(varName, varName, null, "openapi", "restapi", null, "", endpoint, null, null,
                 null, null, null, null, "", null, null);
     }
 
@@ -64,12 +64,12 @@ class RunServiceTest {
     }
 
     private static Card assertCard(String varName, String code) {
-        return new Card(varName, varName, null, "jsonassert", "script", "", "", null, null,
+        return new Card(varName, varName, null, "jsonassert", "script", null, "", "", null, null,
                 null, null, null, null, code, null, null);
     }
 
     private static Card mongoCard(String varName, String sourceName, String code) {
-        return new Card(varName, varName, null, "mongo", "find", sourceName, "", null, null,
+        return new Card(varName, varName, null, "mongo", "find", "x", sourceName, "", null, null,
                 null, null, null, null, code, null, null);
     }
 
@@ -215,7 +215,7 @@ class RunServiceTest {
     @Test
     void invalidCodeFailsTheCardBeforeItRuns() {
         FrameRunResponse r = run(new Step(1, List.of(
-                mongoCard("wipe", "db", "{\"collection\": \"x\", \"filter\": {}, \"remove\": true}"),
+                mongoCard("wipe", "db", "{\"filter\": {}, \"remove\": true}"),
                 card("never", "rawvalue", "{}"))));
 
         assertEquals(1, r.results().size());
@@ -226,11 +226,11 @@ class RunServiceTest {
 
     @Test
     void mongoCardsFailCleanlyWithoutSourceOrSavedFile() throws IOException {
-        FrameRunResponse noSource = run(new Step(1, List.of(mongoCard("q", "", "{\"collection\": \"x\"}"))));
+        FrameRunResponse noSource = run(new Step(1, List.of(mongoCard("q", "", "{}"))));
         assertEquals("error", noSource.results().getFirst().status());
         assertTrue(noSource.results().getFirst().text().contains("no mongo source"));
 
-        FrameRunResponse missingFile = run(new Step(1, List.of(mongoCard("q", "db", "{\"collection\": \"x\"}"))));
+        FrameRunResponse missingFile = run(new Step(1, List.of(mongoCard("q", "db", "{}"))));
         assertEquals("error", missingFile.results().getFirst().status(),
                 "the connection comes from the saved source file only");
         assertTrue(missingFile.results().getFirst().text().contains("not found"),
@@ -238,8 +238,8 @@ class RunServiceTest {
 
         // with a saved source, the read-only rules still apply before anything connects
         sources.save("demo", List.of(new Source("mongo", "db", "mongodb://127.0.0.1:1/demo", "")));
-        FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "{\"collection\": \"x\"}")
-                .withSubtype("aggregation").withCode("{\"collection\": \"x\", \"pipeline\": [{\"$out\": \"y\"}]}"))));
+        FrameRunResponse write = run(new Step(1, List.of(mongoCard("q", "db", "{}")
+                .withSubtype("aggregation").withCode("{\"pipeline\": [{\"$out\": \"y\"}]}"))));
         assertEquals("error", write.results().getFirst().status());
         assertTrue(write.results().getFirst().text().contains("$out"), write.results().getFirst().text());
     }
@@ -248,7 +248,7 @@ class RunServiceTest {
     void unreachableMongoIsReportedClearlyOnTheCard() throws IOException {
         // the source saves fine; the database behind its base-url simply is not there
         sources.save("demo", List.of(new Source("mongo", "down", "mongodb://127.0.0.1:1/demo", "")));
-        FrameRunResponse r = run(new Step(1, List.of(mongoCard("q", "down", "{\"collection\": \"x\"}"))));
+        FrameRunResponse r = run(new Step(1, List.of(mongoCard("q", "down", "{}"))));
         CardResult card = r.results().getFirst();
         assertEquals("error", card.status());
         // the driver names the real cause (socket open refused) on the card, and the run stops there

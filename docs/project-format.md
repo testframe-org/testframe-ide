@@ -81,6 +81,7 @@ Keys, in this order:
 | `title` | yes | display name on the canvas (free text) |
 | `source` | yes | `{type-source}/{name-source}`, or the type alone (`rawvalue`, `jsonassert`; also allowed for typed cards without a named source yet) |
 | `subtype` | when the type has subtypes | one subtype of the type (e.g. `find`); absent otherwise |
+| `collection` | mongo cards only (required) | the collection the query reads: non-empty, no `$`, no null character, not `system.*` |
 | `endpoint` | no | `METHOD /path` for openapi cards: one operation of the source's spec |
 | `openapi-id` | no (openapi only) | the operation's `operationId` in the spec: the card's operation identity |
 | `timeout` | no | ms (100–120000); default per card type (request/query/js/sql 5000, jsonassert/json 2000, condition 1000) |
@@ -93,15 +94,17 @@ fence language, all following (type-source, subtype) — see the table above. A 
 `source:`, with an unknown type, a missing/unknown subtype or a name-source on a sourceless
 type is rejected on save (400) and reported in `errors` on load.
 
-## Mongo body (`mongo` cards)
+## Mongo cards
 
-One JSON object (fenced as ```` ```json ````); `{{bindings}}` may appear anywhere in it (the
-rule checks the body with every binding standing for any value, and checks the resolved
-types again at run time). Unknown keys are rejected.
+The collection is frontmatter (`collection: products`, required), like an openapi card's
+`endpoint`. The body is one JSON object (fenced as ```` ```json ````); `{{bindings}}` may appear
+anywhere in it (the rule checks the body with every binding standing for any value, and checks
+the resolved types again at run time). Unknown keys are rejected, `collection` included.
 
-- subtype `find`: `{ "collection": "products", "filter": { "ativo": true } }`, optional
-  `projection`, `sort` (objects), `limit`, `skip` (non-negative integers; at most 1000 documents).
-- subtype `aggregation`: `{ "collection": "products", "pipeline": [ { "$match": { "ativo": true } } ] }`.
+- subtype `find`: `{ "filter": { "ativo": true } }`, optional `projection`, `sort` (objects),
+  `limit`, `skip` (non-negative integers; at most 1000 documents); every key is optional (an
+  empty body reads the whole collection).
+- subtype `aggregation`: `{ "pipeline": [ { "$match": { "ativo": true } } ] }`.
 
 Read-only: write stages (`$out`, `$merge`) are rejected anywhere in the body, before anything
 connects. Values are JSON; MongoDB extended JSON (`{"$oid": "..."}`) is understood. The
@@ -242,7 +245,7 @@ The API exchanges structured JSON; the server builds every path and file. Full s
 - `POST /api/v2/run` `{project, frame, steps: [{number, cards}]}` and `POST /api/v2/run/card`
   run cards on the server (execution section above): per-card outcomes with status
   `success`, `error` (the run stops there) or `skipped` (after a false conditional).
-- `POST /api/v2/run/mongo` `{project, source, subtype, body}`: runs one mongo body.
+- `POST /api/v2/run/mongo` `{project, source, subtype, collection, body}`: runs one mongo query.
 - Invalid data is rejected with 400 `{status, message}` before anything is written. The store
   still validates every path: it strips `..`, applies a character whitelist, checks that the
   path stays under the projects dir, accepts only `.md` files, and never allows a scope equal
@@ -266,10 +269,11 @@ sources/
 title: Get active products
 source: mongo/products-db
 subtype: find
+collection: products
 timeout: 5000
 -------------------
 ```json
-{ "collection": "products", "filter": { "ativo": true } }
+{ "filter": { "ativo": true } }
 ```
 
 # frames/active-products-echo/step-2/create-product.md
