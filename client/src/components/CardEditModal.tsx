@@ -112,6 +112,53 @@ export function CardEditModal({
         <div className="flex-1 flex min-h-0">
           {/* LEFT: GENERAL */}
           <div className="w-80 shrink-0 border-r border-slate-200 overflow-y-auto p-4 space-y-5 bg-slate-50/40">
+            {/* Source first: the type-source decides the rest of the card */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className={sectionCls}>{t('frameSource')}</span>
+                <button onClick={onOpenSources} className="text-[10px] font-medium text-blue-600 hover:text-blue-700">
+                  {t('manageSources')}
+                </button>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">type-source</label>
+                <select
+                  value={card.sourceType}
+                  autoFocus={!card.sourceType}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    // the project's first source of that type is the default name-source
+                    const firstSource = sources.find((s) => s.typeSource === next)?.name ?? '';
+                    update({ sourceType: next, type: cardTypeOf(next), sourceName: firstSource, script: undefined });
+                  }}
+                  className={`${inputCls} ${card.sourceType ? '' : 'ring-2 ring-blue-500/40 border-blue-500'}`}
+                >
+                  {!card.sourceType && <option value="" disabled>{t('sourceTypePlaceholder')}</option>}
+                  {SOURCE_TYPES.map((type) => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+              {card.sourceType && sourceType !== 'inline' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">name-source</label>
+                  <select
+                    value={card.sourceName || ''}
+                    onChange={(e) => update({ sourceName: e.target.value, script: undefined })}
+                    className={inputCls}
+                  >
+                    <option value="">{t('sourceNamePlaceholder')}</option>
+                    {card.sourceName && !source && <option value={card.sourceName}>{card.sourceName} (?)</option>}
+                    {sources
+                      .filter((s) => s.typeSource === sourceType)
+                      .map((s) => (
+                        <option key={s.name} value={s.name}>{s.name}</option>
+                      ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
             <div className="space-y-2.5">
               <span className={sectionCls}>{t('generalSection')}</span>
               <div>
@@ -137,46 +184,6 @@ export function CardEditModal({
                 <div>
                   <label className="block text-xs font-medium text-slate-600 mb-1">{t('endpointField')}</label>
                   <input type="text" value={card.endpoint} onChange={(e) => update({ endpoint: e.target.value })} className={inputCls} />
-                </div>
-              )}
-            </div>
-
-            {/* Source */}
-            <div className="space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className={sectionCls}>{t('frameSource')}</span>
-                <button onClick={onOpenSources} className="text-[10px] font-medium text-blue-600 hover:text-blue-700">
-                  {t('manageSources')}
-                </button>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">type-source</label>
-                <select
-                  value={sourceType}
-                  onChange={(e) => update({ sourceType: e.target.value, type: cardTypeOf(e.target.value), sourceName: '', script: undefined })}
-                  className={inputCls}
-                >
-                  {SOURCE_TYPES.map((type) => (
-                    <option key={type} value={type}>{type}</option>
-                  ))}
-                </select>
-              </div>
-              {sourceType !== 'inline' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">name-source</label>
-                  <select
-                    value={card.sourceName || ''}
-                    onChange={(e) => update({ sourceName: e.target.value, script: undefined })}
-                    className={inputCls}
-                  >
-                    <option value="">{t('sourceNamePlaceholder')}</option>
-                    {card.sourceName && !source && <option value={card.sourceName}>{card.sourceName} (?)</option>}
-                    {sources
-                      .filter((s) => s.typeSource === sourceType)
-                      .map((s) => (
-                        <option key={s.name} value={s.name}>{s.name}</option>
-                      ))}
-                  </select>
                 </div>
               )}
             </div>
@@ -285,10 +292,14 @@ export function CardEditModal({
           <div className="flex-1 min-w-0 overflow-y-auto p-5 space-y-5">
             <div className="space-y-3">
               <div className="flex items-baseline justify-between gap-2">
-                <span className={sectionCls}>{t('sourceFormTitle', { type: sourceType })}</span>
+                <span className={sectionCls}>{card.sourceType ? t('sourceFormTitle', { type: sourceType }) : t('sourceTypePlaceholder')}</span>
                 {card.sourceName && <span className="text-[11px] font-mono text-slate-500 truncate">{sourceType}/{card.sourceName}</span>}
               </div>
-              <SourceForm card={card} source={source} onChange={update} />
+              {card.sourceType ? (
+                <SourceForm card={card} source={source} onChange={update} />
+              ) : (
+                <p className="text-xs text-slate-500 border border-dashed border-slate-300 rounded-lg p-4">{t('sourceTypeFirstHint')}</p>
+              )}
             </div>
 
             {/* Last run of this card */}

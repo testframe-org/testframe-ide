@@ -25,7 +25,7 @@ import {
   slug,
   varNameToFileName
 } from './frames';
-import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT, loadCatalog } from './catalog';
+import { DEFAULT_CARD_SIZE, DEFAULT_TIMEOUT, cardTypeOf, loadCatalog } from './catalog';
 import { ApiError, testframeApi } from './client-api';
 import { useI18n } from './i18n';
 import { setProjectInUrl, touchRecentProject } from './recent-projects';
@@ -300,24 +300,23 @@ export default function App({ project, onSwitchProject }: AppProps) {
     return name;
   };
 
-  // New request cards use the project's first restapi source (sources come only from the project)
-  const defaultRestSource = () => sources.find((src) => src.typeSource === 'restapi')?.name ?? '';
-
-  // Add a new card at the end of a step
+  // Add a new card at the end of a step: it starts without a type-source, which is the
+  // first field the editor asks for (it decides the card's form, size and source)
   const addCard = (stepId: string) => {
     const newId = `card-${Date.now()}`;
+    const type = cardTypeOf('');
     const newCard: Card = {
       id: newId,
-      title: t('defaultRequestTitle'),
-      varName: uniqueVarName('newRequest'),
-      type: 'request',
-      ...DEFAULT_CARD_SIZE.request,
-      timeout: DEFAULT_TIMEOUT.request,
+      title: t('defaultCardTitle'),
+      varName: uniqueVarName('newCard'),
+      type,
+      ...DEFAULT_CARD_SIZE[type],
+      timeout: DEFAULT_TIMEOUT[type],
       status: 'idle',
-      endpoint: 'POST /api/v2/echo',
-      sourceType: 'restapi',
-      sourceName: defaultRestSource(),
-      httpMethod: 'POST',
+      endpoint: '',
+      sourceType: '',
+      sourceName: '',
+      httpMethod: '',
       code: ''
     };
     setSteps((prev) => prev.map((step) => (step.id === stepId ? { ...step, cards: [...step.cards, newCard] } : step)));

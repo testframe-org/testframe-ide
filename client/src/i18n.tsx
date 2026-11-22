@@ -143,7 +143,9 @@ const en = {
   noStepsTitle: 'No steps in this flow yet',
   noStepsHint: 'Add a step to start composing your E2E flow.',
   runEmpty: 'Nothing to run — add a step first.',
-  defaultRequestTitle: 'New Action / Request',
+  defaultCardTitle: 'New card',
+  sourceTypePlaceholder: '— choose the type-source —',
+  sourceTypeFirstHint: 'Choose the card\'s type-source first: it decides the source, the form and how the card runs.',
 
   // Scripts editor (sources {name}/{script}.md)
   addScript: 'Add script',
@@ -291,7 +293,9 @@ const pt: Record<TKey, string> = {
   noStepsTitle: 'Nenhuma etapa neste fluxo ainda',
   noStepsHint: 'Adicione uma etapa para começar a compor seu fluxo E2E.',
   runEmpty: 'Nada para executar — adicione uma etapa primeiro.',
-  defaultRequestTitle: 'Nova Ação / Request',
+  defaultCardTitle: 'Novo card',
+  sourceTypePlaceholder: '— escolha o type-source —',
+  sourceTypeFirstHint: 'Escolha primeiro o type-source do card: ele define a source, o formulário e como o card executa.',
 
   addScript: 'Adicionar script',
   removeScript: 'Remover script',
