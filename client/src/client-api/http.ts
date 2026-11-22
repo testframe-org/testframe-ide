@@ -1,20 +1,30 @@
 export class ApiError extends Error {
   status: number;
+  reason: string; // the server's `message` for {status, message} error bodies, else the raw text
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, reason = message) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.reason = reason;
   }
 }
 
-async function errorText(res: Response): Promise<string> {
+// Framework errors are {status, message}: the message is shown in full; other bodies are cut
+async function toApiError(res: Response): Promise<ApiError> {
+  let body = '';
   try {
-    const body = await res.text();
-    return body ? `${res.status} ${body.slice(0, 160)}` : `HTTP ${res.status}`;
+    body = await res.text();
   } catch {
-    return `HTTP ${res.status}`;
+    return new ApiError(res.status, `HTTP ${res.status}`);
   }
+  try {
+    const parsed = JSON.parse(body) as { message?: unknown };
+    if (typeof parsed.message === 'string') return new ApiError(res.status, `${res.status} ${parsed.message}`, parsed.message);
+  } catch {
+    /* not JSON */
+  }
+  return new ApiError(res.status, body ? `${res.status} ${body.slice(0, 160)}` : `HTTP ${res.status}`, body);
 }
 
 // JSON request helper for same-origin calls (Vite proxy -> testframe server)
@@ -23,7 +33,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers }
   });
-  if (!res.ok) throw new ApiError(res.status, await errorText(res));
+  if (!res.ok) throw await toApiError(res);
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }

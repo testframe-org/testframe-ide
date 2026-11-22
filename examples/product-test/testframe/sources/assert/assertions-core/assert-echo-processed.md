@@ -1,3 +1,5 @@
 -------------------
---------body----------
-assert status == "PROCESSADO"
+-------------------
+```jsonassert
+assert echoResult.status == "PROCESSADO"
+```

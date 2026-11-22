@@ -1,6 +1,6 @@
 -------------------
 base-url: http://localhost:18081/api/docs/openapi.json
---------body----------
+-------------------
 # Product API (Swagger)
 
 Contract source (used by the suite):

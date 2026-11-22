@@ -19,18 +19,16 @@ import {
   DEFAULT_CARD_SIZE,
   DEFAULT_FRAME,
   DEFAULT_TIMEOUT,
-  buildFrameFiles,
   cardVarName,
   endpointParts,
+  frameCodeProblems,
+  frameToApi,
+  framesFromApi,
   pickFrame,
-  rebuildFrames,
   slug,
   substituteTemplates,
-  unwrapSourcesFromLoad,
-  RESULT_SUFFIX,
-  cardBasePath,
-  resultToMd,
-  validateSourceCode
+  validateSourceCode,
+  varNameToFileName
 } from './frames';
 import { runTargetRequest, testframeApi } from './client-api';
 import { useI18n } from './i18n';
@@ -127,7 +125,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
       try {
         const data = await testframeApi.loadSources(project);
         if (data.sources?.length) {
-          loadedSources = unwrapSourcesFromLoad(data.sources);
+          loadedSources = data.sources;
           setSources(loadedSources);
         }
       } catch {
@@ -136,8 +134,8 @@ export default function App({ project, onSwitchProject }: AppProps) {
 
       try {
         const data = await testframeApi.loadFrames(project);
-        if (data.files.length) {
-          const loaded = rebuildFrames(data.files, loadedSources);
+        if (data.frames.length || data.errors.length) {
+          const loaded = framesFromApi(data);
           setCardRuns(loaded.results);
           const frame = pickFrame(loaded.frames);
           if (frame?.steps.length) {
@@ -401,9 +399,10 @@ export default function App({ project, onSwitchProject }: AppProps) {
   // Stores a card's last run next to it (frames/{frame}/step-{n}/{var-file}.result-data.md,
   // gitignored by the server). Best effort: a failure is only logged.
   const persistResult = (step: Step, card: Card, result: CardRunResult) => {
-    const path = `${cardBasePath(frameName, step.number, card)}${RESULT_SUFFIX}`;
+    const varName = cardVarName(card);
+    const path = `${slug(frameName)}/step-${step.number}/${varNameToFileName(varName)}.result-data.md`;
     testframeApi
-      .saveResult(slug(projectName), path, resultToMd(result))
+      .saveResult(slug(projectName), frameName, step.number, varName, result)
       .catch((err: Error) => pushFrameMsg(t('resultSaveFail', { path, msg: err.message }), 'error'));
   };
 
@@ -437,16 +436,9 @@ export default function App({ project, onSwitchProject }: AppProps) {
     if (codeProblem) {
       live = { ok: false, summary: codeProblem, value: null, ms: 0 };
     } else if (card.type === 'validation' && /^assert\b/i.test(card.code.trim())) {
-      // Live assertion against the framework engine (source type: assert)
-      let input: unknown = {};
-      for (const source of jsonBefore) {
-        try {
-          input = substituteTemplates(JSON.parse(source.code), vars);
-          break;
-        } catch {
-          /* try the previous json card */
-        }
-      }
+      // Live assertion against the framework engine (source type: assert). The input is every
+      // variable published so far, by var-name: assert $count(activeProducts) > 0
+      const input: Record<string, unknown> = { ...vars };
       const assertRes = await runTargetRequest('POST', '/api/v2/assertions', {
         expression: card.code.trim(),
         input
@@ -688,11 +680,13 @@ export default function App({ project, onSwitchProject }: AppProps) {
   };
 
   // --- PERSISTENCE: {project}/testframe/frames/{frame}/step-{n}/{var-file}.md ---
-  // The server replaces the frame directory, so removed cards do not linger on disk.
+  // The server validates and serializes the frame and replaces its directory, so removed cards
+  // do not linger on disk. Code rules per source type are still checked here first.
   const saveFrames = async () => {
     try {
-      const files = buildFrameFiles(frameName, steps, sources);
-      const data = await testframeApi.saveFrames(slug(projectName), slug(frameName), files);
+      const problems = frameCodeProblems(steps);
+      if (problems.length) throw new Error(problems[0]);
+      const data = await testframeApi.saveFrames(slug(projectName), frameToApi(frameName, steps));
       pushFrameMsg(t('framesSaved', { n: data.saved, root: data.root }), 'success');
     } catch (err) {
       pushFrameMsg(t('framesSaveFail', { msg: (err as Error).message }), 'error');
@@ -703,11 +697,11 @@ export default function App({ project, onSwitchProject }: AppProps) {
   const loadFrames = async () => {
     try {
       const data = await testframeApi.loadFrames(slug(projectName));
-      if (!data.files.length) {
+      if (!data.frames.length && !data.errors.length) {
         pushFrameMsg(t('noFramesSaved'), 'error');
         return;
       }
-      const loaded = rebuildFrames(data.files, sources);
+      const loaded = framesFromApi(data);
       setCardRuns(loaded.results);
       const frame = pickFrame(loaded.frames, frameName);
       if (!frame?.steps.length) {

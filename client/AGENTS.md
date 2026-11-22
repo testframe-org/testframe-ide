@@ -15,14 +15,18 @@ Vite 8 + React 19 + TypeScript + Tailwind v4 (`@tailwindcss/vite`) + `lucide-rea
   `CardEditModal` (opened by a card's Edit button: general fields on the left, `SourceForm` on the right),
   `SourceForm` (one form per type-source: http, swagger, query, assert, json, expression, code),
   `ExecutionConsole`, `SourcesView` (the Sources tab: source CRUD incl. the scripts editor)
-- `src/frames.ts` — **persistence contract** (spec: `../docs/project-format.md`): card/source
-  `.md` serialization + zod schemas (`cardFrontmatterSchema`, `sourceSchema`) +
-  `buildFrameFiles(frame, steps, sources)` / `rebuildFrames(files, sources)` / `pickFrame` +
-  `wrapSourcesForSave` / `unwrapSourcesFromLoad` + name helpers (`normalizeVarName`,
-  `varNameToFileName`, `fileNameToVarName`) + `substituteTemplates` for `{{varName.path}}`
-  bindings. Identity (frame, step, var-name, source, script) comes from the path only.
-  Changes here must stay in sync with the server (`server/.../store/ProjectFileStore.java`).
-- `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `ScriptFile`, `RawSource`, `HttpResult`...)
+- `src/frames.ts` — editor model and runtime helpers. It does **not** own the project format:
+  the server (`server/.../format/`, spec `../docs/project-format.md`) parses/renders the `.md`
+  files, applies script inheritance and validates on save; the API exchanges JSON.
+  Here: `framesFromApi` / `frameToApi` (JSON ↔ in-memory `Frame`/`Card`, card ids
+  `{frame}/step-{n}/{var-file}`), `pickFrame`, `cardVarName`, name helpers mirrored from the
+  server for live feedback (`slug`, `toVarName`, `normalizeVarName`, `varNameToFileName`),
+  `validateSourceCode` + `frameCodeProblems` (code rules per source type, checked before save
+  until Phase 2 moves them to the server), `cardTypeOf` + `DEFAULT_CARD_SIZE`/`DEFAULT_TIMEOUT`
+  (until the server serves a catalog), `endpointParts` and `substituteTemplates` for
+  `{{varName.path}}` bindings (runner, Phase 3).
+- `src/types.ts` — domain types (`Card`, `Step`, `SourceDef`, `HttpResult`...) and the frames
+  wire shapes (`CardData`, `FrameData`, `FramesLoadResponse`)
 
 ## Commands
 
@@ -39,8 +43,9 @@ bun run dev         # only with env from the root runner (bun run dev ./examples
   `{project}/testframe/`. Hardcoded `SourceDef`s are allowed only as test mocks (e.g. `scripts/smoke.ts`).
 
 - Strict TS: no implicit `any` in new params; component props typed via interfaces.
-- Anything crossing the wire (frame frontmatter, sources) is validated with zod before
-  send/accept. Schema errors surface in the execution console, never as silent crashes.
+- Frames and sources cross the wire as JSON validated by the server: a rejected save is a 400
+  `{status, message}` (`ApiError.reason`), and load problems come back in `errors`. Both surface
+  in the execution console (source save errors also in the Sources tab), never as silent crashes.
 - Requests execute live against the framework (`POST /api/v2/echo`) when the endpoint
   matches `METHOD /path`; validation cards starting with `assert` execute live against
   `POST /api/v2/assertions`; responses feed the step's JSON result card and publish

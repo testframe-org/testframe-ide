@@ -1,4 +1,4 @@
-import type { FrameFile, FramesLoadResponse, FramesSaveResponse, RawSource, SourceDef, WrappedSource } from '../types';
+import type { CardRunResult, FrameData, FramesLoadResponse, FramesSaveResponse, SourceDef } from '../types';
 import { requestJson } from './http';
 
 export interface HealthResponse {
@@ -24,9 +24,7 @@ export interface MongoRunResponse {
 }
 
 export interface SourcesLoadResponse {
-  project: string;
-  root: string;
-  sources?: RawSource[];
+  sources: SourceDef[];
 }
 
 const json = (method: string, body: unknown): RequestInit => ({
@@ -43,18 +41,19 @@ export const testframeApi = {
   echo: (payload: unknown) =>
     requestJson<Record<string, unknown>>('/api/v2/echo', json('POST', payload)),
 
-  // Replaces frames/{frame}/ with `files` (paths relative to frames/, e.g. main/step-1/x.md)
-  saveFrames: (project: string, frame: string, files: FrameFile[]) =>
-    requestJson<FramesSaveResponse>('/api/v2/frames', json('POST', { project, frame, files })),
+  // Replaces frames/{slug(frame.name)}/ (validated and serialized by the server; 400 with the reason)
+  saveFrames: (project: string, frame: FrameData) =>
+    requestJson<FramesSaveResponse>('/api/v2/frames', json('POST', { project, frame })),
 
-  // Stores a card's last run: path relative to frames/ ending in .result-data.md (gitignored)
-  saveResult: (project: string, path: string, content: string) =>
-    requestJson<FramesSaveResponse>('/api/v2/frames/results', json('POST', { project, path, content })),
+  // Stores a card's last run next to it ({var-file}.result-data.md, gitignored)
+  saveResult: (project: string, frame: string, step: number, varName: string, result: CardRunResult) =>
+    requestJson<FramesSaveResponse>('/api/v2/frames/results', json('POST', { project, frame, step, varName, result })),
 
   loadFrames: (project: string) =>
     requestJson<FramesLoadResponse>(`/api/v2/frames/${encodeURIComponent(project)}`),
 
-  saveSources: (project: string, sources: WrappedSource[]) =>
+  // Each sent source replaces its files and script folder (validated by the server; 400 with the reason)
+  saveSources: (project: string, sources: SourceDef[]) =>
     requestJson<FramesSaveResponse>('/api/v2/sources', json('POST', { project, sources })),
 
   loadSources: (project: string) =>

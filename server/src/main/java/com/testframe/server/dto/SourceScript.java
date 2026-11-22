@@ -1,7 +1,5 @@
 package com.testframe.server.dto;
 
-public record SourceScript(
-        String file,
-        String content
-) {
+/** A custom query/method of a source: camelCase {@code name}, stored as {@code {kebab-name}.md}. */
+public record SourceScript(String name, String body) {
 }

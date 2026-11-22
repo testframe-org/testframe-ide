@@ -14,8 +14,8 @@ Vite 8 + React 19 + TypeScript (strict) + Tailwind v4 + zod v4 + lucide-react.
 - `src/i18n.tsx` - all UI strings in en/pt-BR dictionaries; toggle in the header
 - `src/client-api/` - the only place fetch is allowed (framework + target calls)
 - `src/components/` - StepFrame, TestBlockCard, CardEditModal, SourceForm, SourcesView, ExecutionConsole...
-- `src/frames.ts` - persistence contract: `.md` serialization + zod schemas +
-  `{{varName}}` template resolution
+- `src/frames.ts` - editor model (JSON from the framework API ↔ canvas cards), code rules per
+  source type and `{{varName}}` template resolution; the `.md` format is owned by the server
 
 ## Running
 

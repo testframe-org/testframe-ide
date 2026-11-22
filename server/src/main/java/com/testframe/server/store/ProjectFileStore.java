@@ -1,6 +1,7 @@
 package com.testframe.server.store;
 
-import com.testframe.server.dto.FrameFile;
+import com.testframe.server.format.CardCodec;
+import com.testframe.server.format.ProjectFile;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -32,12 +33,12 @@ public class ProjectFileStore {
     }
 
     /** Versioned templates for private files ({@code <name>.private.example.md}): never pruned by a save. */
-    public static final String PRIVATE_EXAMPLE_SUFFIX = ".private.example.md";
+    public static final String PRIVATE_EXAMPLE_SUFFIX = CardCodec.PRIVATE_EXAMPLE_SUFFIX;
 
     /** Last run of a card ({var-file}.result-data.md): kept while its card exists, never versioned. */
-    public static final String RESULT_SUFFIX = ".result-data.md";
+    public static final String RESULT_SUFFIX = CardCodec.RESULT_SUFFIX;
 
-    public Map<String, Object> save(String project, String subDir, List<FrameFile> files) throws IOException {
+    public Map<String, Object> save(String project, String subDir, List<ProjectFile> files) throws IOException {
         return replace(project, subDir, List.of(), List.of(), files);
     }
 
@@ -50,12 +51,12 @@ public class ProjectFileStore {
      * {@code *.private.example.md} templates are never deleted.
      */
     public Map<String, Object> replace(String project, String subDir, Collection<String> scopes,
-                                       Collection<String> staleFiles, List<FrameFile> files) throws IOException {
+                                       Collection<String> staleFiles, List<ProjectFile> files) throws IOException {
         Path dir = resolve(project).resolve(subDir);
 
         // Validate every path before touching the disk
         Map<Path, String> targets = new LinkedHashMap<>();
-        for (FrameFile file : files) {
+        for (ProjectFile file : files) {
             Path target = resolve(file.path(), dir);
             if (!target.getFileName().toString().endsWith(".md")) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only .md files can be stored: " + file.path());
@@ -137,7 +138,7 @@ public class ProjectFileStore {
         if (relativePath == null || !relativePath.endsWith(RESULT_SUFFIX)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Result files must end with " + RESULT_SUFFIX);
         }
-        Map<String, Object> saved = save(project, "testframe/frames", List.of(new FrameFile(relativePath, content)));
+        Map<String, Object> saved = save(project, "testframe/frames", List.of(new ProjectFile(relativePath, content)));
         Path gitignore = resolve(project).resolve("testframe/.gitignore");
         String pattern = "*" + RESULT_SUFFIX;
         String current = Files.exists(gitignore) ? Files.readString(gitignore, StandardCharsets.UTF_8) : "";
@@ -158,10 +159,10 @@ public class ProjectFileStore {
         }
     }
 
-    public Map<String, Object> load(String project, String subDir) throws IOException {
+    /** Every {@code .md} file under {@code subDir}, paths relative to it, sorted by path. */
+    public List<ProjectFile> list(String project, String subDir) throws IOException {
         Path dir = resolve(project).resolve(subDir);
-        List<Map<String, String>> files = new ArrayList<>();
-
+        List<ProjectFile> files = new ArrayList<>();
         if (Files.isDirectory(dir)) {
             try (Stream<Path> walk = Files.walk(dir)) {
                 List<Path> paths = walk
@@ -170,15 +171,12 @@ public class ProjectFileStore {
                         .sorted(Comparator.comparing(Path::toString))
                         .toList();
                 for (Path p : paths) {
-                    files.add(Map.of(
-                            "path", dir.relativize(p).toString().replace('\\', '/'),
-                            "content", Files.readString(p, StandardCharsets.UTF_8)
-                    ));
+                    files.add(new ProjectFile(dir.relativize(p).toString().replace('\\', '/'),
+                            Files.readString(p, StandardCharsets.UTF_8)));
                 }
             }
         }
-
-        return Map.of("project", project, "root", dir.toString(), "files", files);
+        return files;
     }
 
     /** A project folder: {projects-dir}/{name}/testframe/{frames,sources}. */

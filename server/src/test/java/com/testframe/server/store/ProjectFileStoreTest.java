@@ -1,6 +1,6 @@
 package com.testframe.server.store;
 
-import com.testframe.server.dto.FrameFile;
+import com.testframe.server.format.ProjectFile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.web.server.ResponseStatusException;
@@ -28,12 +28,12 @@ class ProjectFileStoreTest {
     void replaceRemovesStaleCardsOnlyInsideTheSavedFrame() throws Exception {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         store.replace("demo", "testframe/frames", List.of("main", "other"), List.of(), List.of(
-                new FrameFile("main/step-1/a-card.md", "a"),
-                new FrameFile("main/step-2/b-card.md", "b"),
-                new FrameFile("other/step-1/c-card.md", "c")));
+                new ProjectFile("main/step-1/a-card.md", "a"),
+                new ProjectFile("main/step-2/b-card.md", "b"),
+                new ProjectFile("other/step-1/c-card.md", "c")));
 
         Map<String, Object> result = store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
-                new FrameFile("main/step-1/a-card.md", "a2")));
+                new ProjectFile("main/step-1/a-card.md", "a2")));
 
         assertEquals(1, result.get("saved"));
         assertEquals(1, result.get("removed"));
@@ -45,7 +45,7 @@ class ProjectFileStoreTest {
     @Test
     void emptyReplaceClearsTheScope() throws Exception {
         ProjectFileStore store = new ProjectFileStore(root.toString());
-        store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(new FrameFile("main/step-1/a-card.md", "a")));
+        store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(new ProjectFile("main/step-1/a-card.md", "a")));
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of());
         assertFalse(Files.exists(frames().resolve("main")));
     }
@@ -54,9 +54,9 @@ class ProjectFileStoreTest {
     void rejectsTraversalNonMarkdownAndRootScope() {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         assertThrows(ResponseStatusException.class, () -> store.replace("demo", "testframe/frames", List.of(), List.of(),
-                List.of(new FrameFile("../../etc/passwd.md", "x"))));
+                List.of(new ProjectFile("../../etc/passwd.md", "x"))));
         assertThrows(ResponseStatusException.class, () -> store.replace("demo", "testframe/frames", List.of(), List.of(),
-                List.of(new FrameFile("main/step-1/run.sh", "x"))));
+                List.of(new ProjectFile("main/step-1/run.sh", "x"))));
         assertThrows(ResponseStatusException.class, () -> store.replace("demo", "testframe/frames", List.of("."), List.of(),
                 List.of()));
         assertThrows(ResponseStatusException.class, () -> store.replace("demo", "testframe/frames", List.of(".."), List.of(),
@@ -72,8 +72,8 @@ class ProjectFileStoreTest {
         Files.writeString(template, "template");
 
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
-                new FrameFile("main/step-1/a-card.md", "a"),
-                new FrameFile("main/step-1/a-card.private.md", "secret")));
+                new ProjectFile("main/step-1/a-card.md", "a"),
+                new ProjectFile("main/step-1/a-card.private.md", "secret")));
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of());
 
         assertTrue(Files.exists(template), "versioned template survives a replace");
@@ -85,13 +85,13 @@ class ProjectFileStoreTest {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         Path sources = root.resolve("demo/testframe/sources");
         store.replace("demo", "testframe/sources", List.of("mongo/db"), List.of(), List.of(
-                new FrameFile("mongo/db.md", "pub"),
-                new FrameFile("mongo/db.private.md", "priv"),
-                new FrameFile("mongo/db/get-all.md", "q")));
+                new ProjectFile("mongo/db.md", "pub"),
+                new ProjectFile("mongo/db.private.md", "priv"),
+                new ProjectFile("mongo/db/get-all.md", "q")));
 
         Map<String, Object> result = store.replace("demo", "testframe/sources", List.of("mongo/db"),
                 List.of("mongo/db.md", "mongo/db.private.md", "mongo/db.private.example.md"),
-                List.of(new FrameFile("mongo/db.md", "pub2")));
+                List.of(new ProjectFile("mongo/db.md", "pub2")));
 
         assertEquals(2, result.get("removed"));
         assertEquals("pub2", Files.readString(sources.resolve("mongo/db.md")));
@@ -103,11 +103,11 @@ class ProjectFileStoreTest {
     void listsProjectsWithCounts() throws Exception {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
-                new FrameFile("main/step-1/a-card.md", "a")));
+                new ProjectFile("main/step-1/a-card.md", "a")));
         store.replace("demo", "testframe/sources", List.of("mongo/db"), List.of(), List.of(
-                new FrameFile("mongo/db.md", "pub"),
-                new FrameFile("mongo/db.private.md", "priv"),
-                new FrameFile("mongo/db/get-all.md", "q")));
+                new ProjectFile("mongo/db.md", "pub"),
+                new ProjectFile("mongo/db.private.md", "priv"),
+                new ProjectFile("mongo/db/get-all.md", "q")));
         Files.createDirectories(root.resolve("not-a-project"));
 
         List<ProjectFileStore.ProjectSummary> projects = store.listProjects();
@@ -122,8 +122,8 @@ class ProjectFileStoreTest {
     void resultFilesFollowTheirCardAndAreGitignored() throws Exception {
         ProjectFileStore store = new ProjectFileStore(root.toString());
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
-                new FrameFile("main/step-1/a-card.md", "a"),
-                new FrameFile("main/step-1/b-card.md", "b")));
+                new ProjectFile("main/step-1/a-card.md", "a"),
+                new ProjectFile("main/step-1/b-card.md", "b")));
         store.saveResult("demo", "main/step-1/a-card.result-data.md", "ok");
         store.saveResult("demo", "main/step-1/b-card.result-data.md", "ok");
         store.saveResult("demo", "main/step-1/b-card.result-data.md", "ok again");
@@ -131,7 +131,7 @@ class ProjectFileStoreTest {
 
         // saving the frame without b-card keeps a's result and drops b's
         store.replace("demo", "testframe/frames", List.of("main"), List.of(), List.of(
-                new FrameFile("main/step-1/a-card.md", "a")));
+                new ProjectFile("main/step-1/a-card.md", "a")));
 
         assertTrue(Files.exists(frames().resolve("main/step-1/a-card.result-data.md")));
         assertFalse(Files.exists(frames().resolve("main/step-1/b-card.result-data.md")));

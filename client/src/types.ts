@@ -43,12 +43,7 @@ export interface SourceScript {
   body: string; // the query/code itself
 }
 
-// Shape sent to POST /api/v2/sources after wrapping
-export interface ScriptFile {
-  file: string; // kebab-case file name, e.g. obter-produtos-ativos.md
-  content: string; // full .md (frontmatter + body)
-}
-
+// GET/POST /api/v2/sources: the server reads/writes sources/{type}/{name}.md (+ .private.md, scripts)
 export interface SourceDef {
   typeSource: string;
   name: string;
@@ -57,17 +52,6 @@ export interface SourceDef {
   privateData: string;
   scripts?: SourceScript[]; // custom queries; swagger sources rely on the spec instead
 }
-
-// Shape received from GET /api/v2/sources/{project}
-export interface RawSource {
-  typeSource: string;
-  name: string;
-  publicData: string;
-  privateData: string;
-  scripts?: ScriptFile[];
-}
-
-export type WrappedSource = Omit<SourceDef, 'scripts'> & { scripts: ScriptFile[] };
 
 export interface ExecLog {
   time: string;
@@ -81,11 +65,6 @@ export interface HttpResult {
   statusText: string;
   ms: number;
   text: string;
-}
-
-export interface FrameFile {
-  path: string;
-  content: string;
 }
 
 export interface EndpointParts {
@@ -111,8 +90,47 @@ export interface Frame {
   steps: Step[];
 }
 
+// --- Wire shapes of GET/POST /api/v2/frames (the server owns the .md format) ---
+// type and httpMethod are derived by the server (ignored on save), as are order and step
+// numbers (positions); lastRun is the card's {var-file}.result-data.md.
+export interface CardData {
+  varName: string;
+  title: string;
+  type: string;
+  order: number;
+  sourceType: string;
+  sourceName: string;
+  script: string | null;
+  endpoint: string;
+  httpMethod: string;
+  timeout: number | null;
+  width: number | null;
+  height: number | null;
+  resultHeight: number | null;
+  code: string;
+  privateData: string | null;
+  lastRun: CardRunData | null;
+}
+
+export interface CardRunData {
+  status: CardStatus;
+  text: string;
+  output: string;
+  at: string;
+  ranAt?: string | null;
+}
+
+export interface StepData {
+  number: number;
+  cards: CardData[];
+}
+
+export interface FrameData {
+  name: string;
+  steps: StepData[];
+}
+
 export interface FramesLoadResponse {
-  project: string;
-  root: string;
-  files: FrameFile[];
+  frames: FrameData[];
+  errors: string[]; // invalid files and warnings (e.g. a missing source script)
 }

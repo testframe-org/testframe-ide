@@ -1,7 +1,7 @@
 import React from 'react';
 import { Plus, Trash2, Save, Loader2, RefreshCw, AlertCircle, FileCode2 } from 'lucide-react';
-import { testframeApi } from '../client-api';
-import { SOURCE_TYPES, hasScripts, sourceSchema, unwrapSourcesFromLoad, wrapSourcesForSave } from '../frames';
+import { ApiError, testframeApi } from '../client-api';
+import { SOURCE_TYPES, hasScripts, validateSourceCode } from '../frames';
 import { useI18n } from '../i18n';
 import type { LogLevel, SourceDef, SourceScript } from '../types';
 
@@ -58,15 +58,15 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
     setErrors([]);
   };
 
+  // Code rules per source type are checked here; names, types and the file layout are validated
+  // by the server on save (its 400 reasons land in the same error list)
   const validate = (): boolean => {
     const issues: string[] = [];
     sources.forEach((s, i) => {
-      const result = sourceSchema.safeParse(s);
-      if (!result.success) {
-        result.error.issues.forEach((iss) =>
-          issues.push(`Source ${i + 1} (${s.name || '?'}): ${[...iss.path].join('.') || 'field'}: ${iss.message}`)
-        );
-      }
+      (s.scripts ?? []).forEach((script, j) => {
+        const problem = validateSourceCode(s.typeSource, script.body);
+        if (problem) issues.push(`Source ${i + 1} (${s.name || '?'}): scripts.${j}.body: ${script.name}: ${problem}`);
+      });
     });
     setErrors(issues);
     return issues.length === 0;
@@ -76,9 +76,10 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
     if (!validate()) return;
     setSaving(true);
     try {
-      const data = await testframeApi.saveSources(project, wrapSourcesForSave(sources));
+      const data = await testframeApi.saveSources(project, sources);
       onLog?.(t('savedSources', { n: data.saved, root: data.root }), 'success');
     } catch (err) {
+      if (err instanceof ApiError && err.status === 400) setErrors(err.reason.split('; '));
       onLog?.(t('savedSourcesFail', { msg: (err as Error).message }), 'error');
     } finally {
       setSaving(false);
@@ -89,7 +90,7 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
     try {
       const data = await testframeApi.loadSources(project);
       if (data.sources?.length) {
-        setSources(unwrapSourcesFromLoad(data.sources));
+        setSources(data.sources);
         setSelectedIndex(0);
         onLog?.(t('loadedSources', { n: data.sources.length }), 'success');
       } else {
