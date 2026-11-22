@@ -288,18 +288,19 @@ export default function App({ project, onSwitchProject }: AppProps) {
 
   // Variables the edited card can reference: every card before it in run order, valued by the
   // last run (or the card's stored result) so completion can offer their fields
-  const completionVars = (() => {
+  const completionVarsFor = (cardId: string | null): Record<string, unknown> => {
     const vars: Record<string, unknown> = {};
-    if (!editorCardId) return vars;
+    if (!cardId) return vars;
     for (const step of steps) {
       for (const card of step.cards) {
-        if (card.id === editorCardId) return vars;
+        if (card.id === cardId) return vars;
         const name = cardVarName(card);
         vars[name] = name in lastVarsRef.current ? lastVarsRef.current[name] : parseOutput(cardRuns[card.id]?.output);
       }
     }
     return vars;
-  })();
+  };
+  const completionVars = completionVarsFor(editorCardId);
   const closeEditor = useCallback(() => setEditorCardId(null), []);
 
   // Update a specific card property
@@ -912,6 +913,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
                 copiedId={copiedId}
                 cardRuns={cardRuns}
                 zoom={zoom}
+                completionVarsFor={completionVarsFor}
                 onSelectCard={(id) => setSelectedCardId(id)}
                 onStartEditCode={(id) => setEditingCodeCardId(id)}
                 onStopEditCode={() => setEditingCodeCardId(null)}

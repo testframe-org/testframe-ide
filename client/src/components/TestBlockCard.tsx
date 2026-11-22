@@ -9,6 +9,9 @@ import {
   XCircle
 } from 'lucide-react';
 import { highlightSyntax, languageOf } from '../highlight';
+import { CodeEditor } from './CodeEditor';
+import { formKindOf } from '../catalog';
+import type { CompletionContext } from '../autocomplete';
 import { RunOutput } from './RunOutput';
 import { useI18n } from '../i18n';
 import type { Card, CardRunResult, ResizeDirection } from '../client-api/testframe.z';
@@ -20,6 +23,7 @@ interface TestBlockCardProps {
   isCopied: boolean;
   lastRun?: CardRunResult; // shown under the script once the card has run
   zoom: number; // canvas zoom, to convert mouse deltas while resizing
+  completionVars?: Record<string, unknown>; // variables of earlier cards, for code completion
   onSelect: () => void;
   onStartEditCode: () => void;
   onStopEditCode: () => void;
@@ -39,6 +43,7 @@ export function TestBlockCard({
   isCopied,
   lastRun,
   zoom,
+  completionVars = {},
   onSelect,
   onStartEditCode,
   onStopEditCode,
@@ -48,6 +53,12 @@ export function TestBlockCard({
   onCopy
 }: TestBlockCardProps) {
   const { t } = useI18n();
+  // same rule as SourceForm: assert lines and conditions speak jsonassert, other bodies only bind {{vars}}
+  const kind = formKindOf(card.sourceType, card.subtype) ?? 'code';
+  const completion: CompletionContext = {
+    mode: kind === 'script' || kind === 'condition' ? 'jsonassert' : 'bindings',
+    vars: completionVars
+  };
 
   // Height of the last-run panel: stored per card, default ~40% of the card
   const maxResult = Math.max(40, card.height - 110);
@@ -193,18 +204,23 @@ export function TestBlockCard({
             e.stopPropagation();
             onStartEditCode();
           }}
-          className="flex-1 min-h-6 overflow-auto scrollbar-dark p-2.5 relative cursor-text"
+          className={`flex-1 min-h-6 p-2.5 relative cursor-text ${
+            // editing: no clipping, so the completion popup can extend past the card
+            isEditingCode ? 'overflow-visible' : 'overflow-auto scrollbar-dark'
+          }`}
         >
           {isEditingCode ? (
-            <textarea
-              autoFocus
-              value={card.code}
-              onChange={(e) => onUpdateCard({ code: e.target.value })}
-              onBlur={onStopEditCode}
-              onClick={(e) => e.stopPropagation()}
-              spellCheck={false}
-              className="w-full h-full bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2 rounded border border-blue-500/60 outline-none resize-none"
-            />
+            <div onClick={(e) => e.stopPropagation()} className="h-full">
+              <CodeEditor
+                autoFocus
+                value={card.code}
+                onChange={(code) => onUpdateCard({ code })}
+                onBlur={onStopEditCode}
+                completion={completion}
+                wrapperClassName="h-full"
+                className="w-full h-full bg-[#191B24] text-slate-100 font-mono text-[12px] leading-5 p-2 rounded border border-blue-500/60 outline-none resize-none"
+              />
+            </div>
           ) : (
             <div className="min-w-max">{highlightSyntax(card.code, languageOf(card))}</div>
           )}

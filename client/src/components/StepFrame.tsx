@@ -14,6 +14,7 @@ interface StepFrameProps {
   copiedId: string | null;
   cardRuns: Record<string, CardRunResult>; // last run per card id
   zoom: number;
+  completionVarsFor: (cardId: string) => Record<string, unknown>; // variables visible to a card
   onSelectCard: (id: string) => void;
   onStartEditCode: (id: string) => void;
   onStopEditCode: () => void;
@@ -37,6 +38,7 @@ export function StepFrame({
   copiedId,
   cardRuns,
   zoom,
+  completionVarsFor,
   onSelectCard,
   onStartEditCode,
   onStopEditCode,
@@ -89,6 +91,7 @@ export function StepFrame({
                 isCopied={copiedId === card.id}
                 lastRun={cardRuns[card.id]}
                 zoom={zoom}
+                completionVars={editingCodeCardId === card.id ? completionVarsFor(card.id) : undefined}
                 onSelect={() => onSelectCard(card.id)}
                 onStartEditCode={() => onStartEditCode(card.id)}
                 onStopEditCode={onStopEditCode}

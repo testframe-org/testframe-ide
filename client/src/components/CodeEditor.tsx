@@ -11,6 +11,10 @@ interface CodeEditorProps {
   rows?: number;
   placeholder?: string;
   className?: string;
+  /** Class of the wrapper div (e.g. `h-full` so the textarea can fill its container). */
+  wrapperClassName?: string;
+  autoFocus?: boolean;
+  onBlur?: () => void;
 }
 
 const KIND_BADGE: Record<CompletionItem['kind'], { label: string; cls: string }> = {
@@ -51,7 +55,7 @@ function caretPosition(textarea: HTMLTextAreaElement, index: number): { left: nu
   return position;
 }
 
-export function CodeEditor({ value, onChange, completion, rows = 12, placeholder, className }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, completion, rows = 12, placeholder, className, wrapperClassName, autoFocus, onBlur }: CodeEditorProps) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const listRef = useRef<HTMLUListElement | null>(null);
   const [result, setResult] = useState<CompletionResult | null>(null);
@@ -122,7 +126,7 @@ export function CodeEditor({ value, onChange, completion, rows = 12, placeholder
   };
 
   return (
-    <div className="relative">
+    <div className={`relative ${wrapperClassName ?? ''}`}>
       <textarea
         ref={ref}
         value={value}
@@ -132,7 +136,11 @@ export function CodeEditor({ value, onChange, completion, rows = 12, placeholder
         }}
         onKeyDown={onKeyDown}
         onClick={() => setResult(null)}
-        onBlur={() => setResult(null)}
+        autoFocus={autoFocus}
+        onBlur={() => {
+          setResult(null);
+          onBlur?.();
+        }}
         onScroll={() => setResult(null)}
         spellCheck={false}
         autoComplete="off"
