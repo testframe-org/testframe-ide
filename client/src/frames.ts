@@ -61,14 +61,18 @@ export const DEFAULT_FRAME = 'main';
 // Layout defaults: `size` is only written when a card differs from these
 export const DEFAULT_CARD_SIZE: Record<CardType, { width: number; height: number }> = {
   request: { width: 320, height: 210 },
-  script: { width: 320, height: 210 },
+  js: { width: 320, height: 210 },
+  sql: { width: 320, height: 210 },
+  jsonassert: { width: 300, height: 190 },
   json: { width: 290, height: 185 },
   validation: { width: 240, height: 165 }
 };
 
 export const DEFAULT_TIMEOUT: Record<CardType, number> = {
   request: 5000,
-  script: 5000,
+  js: 5000,
+  sql: 5000,
+  jsonassert: 2000,
   json: 2000,
   validation: 1000
 };
@@ -251,11 +255,19 @@ export const cardTypeOf = (sourceType: string): CardType => {
       return 'request';
     case 'assert':
       return 'validation';
+    case 'oracle':
+    case 'postgres':
+    case 'mysql':
+    case 'sqlserver':
+      return 'sql';
+    case 'filter':
+    case 'mapper':
+      return 'jsonassert';
     case 'inline':
     case '':
       return 'json';
     default:
-      return 'script'; // mongo, SQL types, filter, mapper, kafka, grpc
+      return 'js'; // mongo (shell JS), kafka, grpc
   }
 };
 

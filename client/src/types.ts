@@ -1,4 +1,5 @@
-export type CardType = 'request' | 'script' | 'json' | 'validation';
+// Derived from the source type (cardTypeOf), never stored: each family has its own type
+export type CardType = 'request' | 'js' | 'sql' | 'jsonassert' | 'json' | 'validation';
 export type CardStatus = 'idle' | 'running' | 'success' | 'error';
 export type ResizeDirection = 'right' | 'bottom' | 'corner';
 export type LogLevel = 'info' | 'success' | 'error';

@@ -552,7 +552,7 @@ export default function App({ project, onSwitchProject }: AppProps) {
         } catch {
           /* contains unresolved templates: keep without publishing */
         }
-      } else if (!shouldFail && card.type === 'script') {
+      } else if (!shouldFail && (card.type === 'js' || card.type === 'sql' || card.type === 'jsonassert')) {
         const resultCard = nextJson;
         if (resultCard) {
           try {

@@ -135,13 +135,14 @@ export function TestBlockCard({
         <span className="uppercase font-mono tracking-wider text-slate-300 flex items-center gap-1">
           <span
             className={`w-1.5 h-1.5 rounded-full ${
-              card.type === 'json'
-                ? 'bg-amber-400'
-                : card.type === 'script'
-                ? 'bg-purple-400'
-                : card.type === 'validation'
-                ? 'bg-emerald-400'
-                : 'bg-sky-400'
+              {
+                json: 'bg-amber-400',
+                js: 'bg-yellow-300',
+                sql: 'bg-purple-400',
+                jsonassert: 'bg-pink-400',
+                validation: 'bg-emerald-400',
+                request: 'bg-sky-400'
+              }[card.type]
             }`}
           />
           {card.type}

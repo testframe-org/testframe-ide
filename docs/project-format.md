@@ -61,8 +61,8 @@ duplicate var-names within a frame, because var-names are the binding identity.
 
 Derived, never stored: card id (`{frame}/step-{n}/{var-file}`), step id/number,
 var-name, http-method, and the card type, which follows the source type (`cardTypeOf`):
-restapi/graphql/swagger → request, assert → validation, inline (no `source`) → json,
-everything else (mongo, SQL types, filter, mapper…) → script.
+restapi/graphql/swagger → request, mongo (and kafka/grpc) → js, oracle/postgres/mysql/sqlserver
+→ sql, filter/mapper → jsonassert, assert → validation, inline (no `source`) → json.
 
 ## Sources: `sources/{type-source}/{name-source}.md`
 
