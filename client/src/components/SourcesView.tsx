@@ -47,7 +47,20 @@ export function SourcesView({ project, sources, setSources, onLog }: SourcesView
     setErrors([]);
   };
 
-  const removeSource = () => {
+  // Deletes the source's files on the server (409 while cards use it: the reason lands in the
+  // error list); a source the server does not know (404, never saved) is only dropped from the list
+  const removeSource = async () => {
+    if (!current || !window.confirm(t('confirmDeleteSource', { name: `${current.typeSource}/${current.name}` }))) return;
+    try {
+      await testframeApi.deleteSource(project, current.typeSource, current.name);
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 404)) {
+        const reason = err instanceof ApiError ? err.reason : (err as Error).message;
+        setErrors([reason]);
+        onLog?.(reason, 'error');
+        return;
+      }
+    }
     setSources((prev) => prev.filter((_, i) => i !== selectedIndex));
     setSelectedIndex((i) => Math.max(0, Math.min(i, sources.length - 2)));
     setErrors([]);

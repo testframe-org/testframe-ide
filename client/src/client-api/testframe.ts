@@ -77,6 +77,13 @@ export const testframeApi = {
   saveSources: (project: string, sources: SourceDef[]) =>
     call(framesSaveResponseSchema, '/api/v2/sources', json('POST', { project, sources })),
 
+  // Deletes one source with its private/cache files (404 when not on disk, 409 listing the cards that use it)
+  deleteSource: (project: string, type: string, name: string) =>
+    requestJson<void>(
+      `/api/v2/sources/${encodeURIComponent(type)}/${encodeURIComponent(name)}?project=${encodeURIComponent(project)}`,
+      { method: 'DELETE' }
+    ),
+
   loadSources: (project: string) => call(sourcesLoadResponseSchema, `/api/v2/sources/${encodeURIComponent(project)}`),
 
   // Runs the whole frame on the server: cards execute in the sent order (steps, then the

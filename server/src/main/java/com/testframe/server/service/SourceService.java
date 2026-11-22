@@ -3,7 +3,12 @@ package com.testframe.server.service;
 import com.testframe.server.dto.Source;
 import com.testframe.server.dto.SourcesResponse;
 import com.testframe.server.format.CardCodec;
+import com.testframe.server.dto.Card;
+import com.testframe.server.dto.Frame;
+import com.testframe.server.dto.Step;
+import com.testframe.server.format.Catalog;
 import com.testframe.server.format.FormatException;
+import com.testframe.server.format.FrameCodec;
 import com.testframe.server.format.Names;
 import com.testframe.server.format.SourceCodec;
 import com.testframe.server.store.ProjectFileStore;
@@ -12,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,5 +75,39 @@ public class SourceService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "sources/" + file + " has no base-url");
         }
         return Names.trim(baseUrl);
+    }
+
+    /**
+     * Deletes {@code sources/{type}/{name}.md} with its {@code .private.md} and {@code .cache.md}
+     * siblings. Type and name are validated like on save (400); 404 when the source does not
+     * exist; 409 (listing the referencing cards) while a card of any frame still uses it.
+     */
+    public void delete(String project, String type, String name) throws IOException {
+        if (type == null || !Catalog.SOURCE_TYPES.contains(type) || !Catalog.hasSources(type)) {
+            throw new FormatException("invalid source type: " + type);
+        }
+        String problem = Names.sourceNameProblem(name);
+        if (problem != null) {
+            throw new FormatException("invalid source name: " + name + " (" + problem + ")");
+        }
+        String base = type + "/" + name;
+        if (store.read(project, SOURCES_DIR, base + ".md").isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Source not found: " + base);
+        }
+        List<String> users = new ArrayList<>();
+        for (Frame frame : FrameCodec.read(store.list(project, FrameService.FRAMES_DIR)).frames()) {
+            for (Step step : frame.steps()) {
+                for (Card card : step.cards()) {
+                    if (type.equals(card.sourceType()) && name.equals(card.sourceName())) {
+                        users.add(frame.name() + "/step-" + step.number() + "/" + card.varName());
+                    }
+                }
+            }
+        }
+        if (!users.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Source " + base + " is used by cards: " + String.join(", ", users));
+        }
+        store.delete(project, SOURCES_DIR, List.of(base + ".md", base + ".private.md", base + CardCodec.CACHE_SUFFIX));
     }
 }

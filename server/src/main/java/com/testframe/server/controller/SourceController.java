@@ -7,12 +7,15 @@ import com.testframe.server.format.Names;
 import com.testframe.server.openapi.OpenApiService;
 import com.testframe.server.openapi.OpenApiSpec;
 import com.testframe.server.service.SourceService;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -69,5 +72,13 @@ public class SourceController {
     @GetMapping("/openapi/{name}/operations")
     public OpenApiSpec operations(@PathVariable String name, @RequestParam String project) throws IOException {
         return openApi.spec(project, name);
+    }
+
+    /** Deletes one source and its private/cache files: 404 when missing, 409 while cards still use it. */
+    @DeleteMapping("/{type}/{name}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void delete(@PathVariable String type, @PathVariable String name, @RequestParam String project)
+            throws IOException {
+        sources.delete(project, type, name);
     }
 }

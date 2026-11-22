@@ -100,6 +100,34 @@ public class ProjectFileStore {
         return Map.of("project", project, "root", dir.toString(), "saved", targets.size(), "removed", removed);
     }
 
+    /**
+     * Deletes the given {@code .md} files (paths relative to {@code subDir}, validated like every
+     * other access), then the directories left empty above them (never {@code subDir} itself).
+     * Returns how many files were removed.
+     */
+    public int delete(String project, String subDir, Collection<String> files) throws IOException {
+        Path dir = resolve(project).resolve(subDir);
+        List<Path> paths = new ArrayList<>();
+        for (String file : new LinkedHashSet<>(files)) {
+            Path path = resolve(file, dir);
+            if (!path.getFileName().toString().endsWith(".md")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only .md files can be removed: " + file);
+            }
+            paths.add(path);
+        }
+        int removed = 0;
+        for (Path path : paths) {
+            if (Files.deleteIfExists(path)) {
+                removed++;
+            }
+            for (Path parent = path.getParent(); parent != null && !parent.equals(dir) && parent.startsWith(dir)
+                    && Files.isDirectory(parent) && isEmpty(parent); parent = parent.getParent()) {
+                Files.delete(parent);
+            }
+        }
+        return removed;
+    }
+
     /** Deletes stale .md files under {@code scopeDir} (keeping {@code keep}) and the directories left empty. */
     private int prune(Path scopeDir, Set<Path> keep) throws IOException {
         if (!Files.isDirectory(scopeDir)) {
