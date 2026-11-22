@@ -144,8 +144,6 @@ const en = {
   noStepsHint: 'Add a step to start composing your E2E flow.',
   runEmpty: 'Nothing to run — add a step first.',
   defaultRequestTitle: 'New Action / Request',
-  defaultJsonResultTitle: 'JSON Result',
-  defaultStepTitle: 'Run validation on step {n}',
 
   // Scripts editor (sources {name}/{script}.md)
   addScript: 'Add script',
@@ -294,8 +292,6 @@ const pt: Record<TKey, string> = {
   noStepsHint: 'Adicione uma etapa para começar a compor seu fluxo E2E.',
   runEmpty: 'Nada para executar — adicione uma etapa primeiro.',
   defaultRequestTitle: 'Nova Ação / Request',
-  defaultJsonResultTitle: 'Resultado em JSON',
-  defaultStepTitle: 'Executar validação na etapa {n}',
 
   addScript: 'Adicionar script',
   removeScript: 'Remover script',

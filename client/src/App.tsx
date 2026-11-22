@@ -341,50 +341,10 @@ export default function App({ project, onSwitchProject }: AppProps) {
     }
   };
 
-  // Add a new step
+  // Add a new step: it starts empty, cards come from its "+" button
   const addNewStep = () => {
-    const nextNumber = steps.length + 1;
-    const newStepId = `step-${Date.now()}`;
-    const requestId = `card-${nextNumber}-1`;
-    const resultId = `card-${nextNumber}-2`;
-
-    const newStep: Step = {
-      id: newStepId,
-      number: nextNumber,
-      cards: [
-        {
-          id: requestId,
-          title: t('defaultStepTitle', { n: nextNumber }),
-          varName: uniqueVarName(`step${nextNumber}Request`),
-          type: 'request',
-          ...DEFAULT_CARD_SIZE.request,
-          timeout: DEFAULT_TIMEOUT.request,
-          status: 'idle',
-          endpoint: 'POST /api/v2/echo',
-          sourceType: 'restapi',
-          sourceName: defaultRestSource(),
-          httpMethod: 'POST',
-          code: `// Step ${nextNumber} - service call\nconst result = await api.post('/api/v2/echo', {\n  test: 'step-${nextNumber}'\n});`
-        },
-        {
-          id: resultId,
-          title: t('defaultJsonResultTitle'),
-          varName: uniqueVarName(`step${nextNumber}Result`),
-          type: 'json',
-          ...DEFAULT_CARD_SIZE.json,
-          timeout: DEFAULT_TIMEOUT.json,
-          status: 'idle',
-          endpoint: '',
-          sourceType: 'inline',
-          sourceName: '',
-          httpMethod: '',
-          code: `{\n  "status": "PROCESSED",\n  "request_id": "REQ-${nextNumber}"\n}`
-        }
-      ]
-    };
-
+    const newStep: Step = { id: `step-${Date.now()}`, number: steps.length + 1, cards: [] };
     setSteps((prev) => [...prev, newStep]);
-    setSelectedCardId(requestId);
   };
 
   // Remove step
