@@ -108,10 +108,9 @@ public final class FrameCodec {
                 }
                 flow.add(fileBase);
             }
-            if (!flow.isEmpty()) {
-                files.add(new ProjectFile("%s/step-%d/%s".formatted(dir, s + 1, FLOW_FILE),
-                        MdEnvelope.render(String.join("\n", flow))));
-            }
+            // An empty step keeps its folder through an empty flow.md.
+            files.add(new ProjectFile("%s/step-%d/%s".formatted(dir, s + 1, FLOW_FILE),
+                    MdEnvelope.render(String.join("\n", flow))));
             files.addAll(stepFiles);
         }
         if (!issues.isEmpty()) {
@@ -181,6 +180,13 @@ public final class FrameCodec {
                 errors.add("%s: private data without a card (%s.md missing)".formatted(base, base));
             }
         }
+
+        // A flow.md without card files is an empty step.
+        flows.keySet().forEach(key -> {
+            int slash = key.indexOf("/step-");
+            byFrame.computeIfAbsent(key.substring(0, slash), k -> new TreeMap<>())
+                    .computeIfAbsent(Integer.parseInt(key.substring(slash + 6)), k -> new ArrayList<>());
+        });
 
         List<Frame> frames = new ArrayList<>();
         byFrame.forEach((name, stepsByNumber) -> {
