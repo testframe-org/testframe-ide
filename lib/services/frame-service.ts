@@ -28,12 +28,12 @@ export class FrameService {
   ) {}
 
   async load(project: string, env?: string | null): Promise<FramesResponse> {
-    const files = await this.store.list(project, FRAMES_DIR);
+    const { files, errors: fileErrors } = await this.store.list(project, FRAMES_DIR);
     const { errors: sourceErrors, ...model } = await this.sources.load(project);
     const environment = env && model.environments.includes(env) ? env : null;
     const results = environment ? await this.lastRuns(project, environment) : new Map<string, CardRun>();
     const read = FrameCodec.read(files, results);
-    const errors = [...read.errors];
+    const errors = [...fileErrors, ...read.errors];
     const declared = new Set(Sources.declaredRefs(model));
     const resolved = environment && !sourceErrors.length ? Sources.resolve(model, environment) : null;
     const specs = new Map<string, OpenApiSpec | null>();
@@ -126,7 +126,8 @@ export class FrameService {
   /** Cards (in every frame) bound to a source that sources.yaml does not declare. */
   async undeclaredSourceUses(project: string, model: Sources.SourcesModel): Promise<string[]> {
     const declared = new Set(Sources.declaredRefs(model));
-    const read = FrameCodec.read(await this.store.list(project, FRAMES_DIR));
+    const { files } = await this.store.list(project, FRAMES_DIR);
+    const read = FrameCodec.read(files);
     const out: string[] = [];
     for (const frame of read.frames) {
       for (const step of frame.steps ?? []) {

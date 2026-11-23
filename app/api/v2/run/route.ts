@@ -10,7 +10,7 @@ export const dynamic = 'force-dynamic';
  * `Accept: application/x-ndjson` streams the run events through; otherwise one JSON answer.
  */
 export async function POST(request: Request) {
-  return handle(async () => {
+  return handle(request, async () => {
     const accept = (request.headers.get('accept') ?? '').includes(NDJSON) ? NDJSON : 'application/json';
     return passThrough(await services().runs.runFrame(await readJson(request), accept));
   });

@@ -1,14 +1,26 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ApiError } from '@/lib/format/errors';
-import { BUILD_DIR, FRAMES_DIR, GITIGNORE_LINES, ProjectStore, isSourcesFileName } from '@/lib/store/project-store';
+import {
+  BUILD_DIR,
+  FRAMES_DIR,
+  GITIGNORE_LINES,
+  MAX_FILE_BYTES,
+  ProjectStore,
+  isSourceLayerFileName,
+  isSourcesFileName
+} from '@/lib/store/project-store';
+import { classify, readModel } from '@/lib/sources/sources-yaml';
 import type { ProjectFile } from '@/lib/format/types';
 import { tmpProject } from '../helpers/tmp-project';
 
 // Port of server/src/test/java/com/testframe/server/store/ProjectFileStoreTest.java, extended for
 // the sources*.yaml layers and the .testframebuild/ cache. Path validation is security-sensitive:
-// every name that comes from a request goes through resolveUnder before anything touches the disk.
+// every name that comes from a request goes through resolveRequestPath (which refuses `..` and
+// absolute paths) and then resolveUnder (character whitelist, length cap, containment, no symlink)
+// before anything touches the disk.
 
 const file = (p: string, content = 'x'): ProjectFile => ({ path: p, content });
 
@@ -94,14 +106,15 @@ describe('project store: replace semantics', () => {
         file('main/step-1/a.md', 'a'),
         file('main/step-1/a.private.md', 'secret')
       ]);
-      const listed = await store.list('demo', FRAMES_DIR);
+      const { files: listed, errors } = await store.list('demo', FRAMES_DIR);
+      expect(errors).toEqual([]);
       expect(listed.map((f) => f.path)).toEqual([
         'main/step-1/a.md',
         'main/step-1/a.private.md',
         'main/step-2/b.md'
       ]);
       expect(listed[0]!.content).toBe('a');
-      expect(await store.list('demo', 'testframe/nothing')).toEqual([]);
+      expect(await store.list('demo', 'testframe/nothing')).toEqual({ files: [], errors: [] });
     } finally {
       tmp.cleanup();
     }
@@ -123,7 +136,7 @@ describe('project store: path sanitization', () => {
     try {
       const store = new ProjectStore(tmp.root);
       for (const [p] of attempts) {
-        expect(async () => store.replace('demo', FRAMES_DIR, [], [], [file(p)])]).toThrow(ApiError);
+        expect(async () => store.replace('demo', FRAMES_DIR, [], [], [file(p)])).toThrow(ApiError);
       }
       expect(existsSync(path.join(tmp.root, 'demo/testframe/frames'))).toBe(false);
       expect(existsSync('/etc/passwd.md')).toBe(false);
@@ -184,6 +197,118 @@ describe('project store: path sanitization', () => {
       expect(async () => store.replace('demo', FRAMES_DIR, [], ['main/step-1/run.sh'], [])).toThrow(ApiError);
       expect(async () => store.replace('demo', FRAMES_DIR, [], ['../../etc/passwd.md'], [])).toThrow(ApiError);
     } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('an absolute path is rejected, never resolved against the base', () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      const base = path.join(tmp.root, 'demo');
+      for (const p of ['/etc/passwd.md', '/', '//etc/passwd.md', '/tmp/x.md']) {
+        expect(() => store.resolveUnder(p, base)).toThrow(ApiError);
+      }
+      // the sub-directory of a save/list is a request path too
+      expect(async () => store.replace('demo', '/etc', [], [], [file('passwd.md')])).toThrow(ApiError);
+      expect(async () => store.replace('demo', '../elsewhere', [], [], [file('a.md')])).toThrow(ApiError);
+      expect(async () => store.list('demo', '../other')).toThrow(ApiError);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('resolveRequestPath rejects .. that resolveUnder would only strip', () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      const base = path.join(tmp.root, 'demo');
+      const traversal = 'main/step-1/a.md/../../../../etc/x.md';
+      // resolveUnder is the containment primitive: '..' is removed, so the result stays inside
+      expect(store.resolveUnder(traversal, base)).toBe(path.join(base, 'main/step-1/a.md/etc/x.md'));
+      // the boundary a request goes through refuses it instead of rewriting it
+      for (const p of [traversal, '..', '../etc', 'main/..', 'a/..', '..']) {
+        expect(() => store.resolveRequestPath(p, base)).toThrow(ApiError);
+      }
+      expect(store.resolveRequestPath('main/step-1/a.md', base)).toBe(path.join(base, 'main/step-1/a.md'));
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('an encoded separator or traversal is never decoded into a path', () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      const base = path.join(tmp.root, 'demo');
+      for (const p of [
+        '..%2F..%2Fetc%2Fpasswd.md',
+        '%2e%2e/etc/passwd.md',
+        'main%2fstep-1%2fa.md',
+        'main/step-1/a%00.md',
+        'main\\step-1\\a.md',
+        'main/step-1/a\u0000.md'
+      ]) {
+        expect(() => store.resolveUnder(p, base)).toThrow(ApiError);
+      }
+      // the character whitelist also holds for a sources layer name and a build cache path
+      expect(isSourcesFileName('sources.%2Eprivate.yaml')).toBe(false);
+      expect(async () => store.writeBuild('demo', 'runs/a%2E%2E/b.json', '{}')).toThrow(ApiError);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('an oversized name is rejected and is not echoed back whole', () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      const base = path.join(tmp.root, 'demo');
+      // a segment over NAME_MAX and a path over the cap never reach the disk
+      expect(() => store.resolveUnder(`${'a'.repeat(300)}.md`, base)).toThrow('Path is too long');
+      expect(() => store.resolveUnder(`${'a/'.repeat(600)}x.md`, base)).toThrow('Path is too long');
+      expect(() => store.resolveUnder(`${'a'.repeat(5000)}.md`, base)).toThrow('Path is too long');
+
+      // a rejected name is echoed truncated, so an oversized value is not amplified into the 400
+      const long = `${'a'.repeat(200)}?.md`;
+      let message = '';
+      try {
+        store.resolveUnder(long, base);
+      } catch (e) {
+        expect(e).toBeInstanceOf(ApiError);
+        message = (e as ApiError).message;
+      }
+      expect(message).toContain('Invalid character in path');
+      expect(message.length).toBeLessThan(long.length);
+      expect(message.endsWith('...')).toBe(true);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('a symlink inside a project cannot carry a write outside it', async () => {
+    const tmp = tmpProject();
+    const outside = mkdtempSync(path.join(tmpdir(), 'testframe-outside-'));
+    try {
+      const store = new ProjectStore(tmp.root);
+      const frames = path.join(tmp.testframeDir, 'frames');
+      mkdirSync(path.join(frames, 'main/step-1'), { recursive: true });
+      symlinkSync(outside, path.join(frames, 'main/step-1/escape'));
+
+      // resolveUnder is lexical, so the escape is caught by the symlink check, not by containment
+      expect(() => store.resolveUnder('main/step-1/escape/pwned.md', frames)).toThrow(ApiError);
+      expect(async () => store.replace('demo', FRAMES_DIR, ['main'], [], [file('main/step-1/escape/pwned.md')])).toThrow(ApiError);
+      expect(async () => store.replace('demo', FRAMES_DIR, ['main/step-1/escape'], [], [])).toThrow(ApiError);
+      expect(existsSync(path.join(outside, 'pwned.md'))).toBe(false);
+
+      // a symlinked project folder is refused too (the plugin reads with NOFOLLOW_LINKS)
+      symlinkSync(outside, path.join(tmp.root, 'linked'));
+      expect(() => store.projectDir('linked')).toThrow(ApiError);
+      // a symlink is not a regular file, so it is never read back as a sources layer
+      symlinkSync(path.join(outside, 'sources.yaml'), path.join(tmp.testframeDir, 'sources.yaml'));
+      expect((await store.readSourceLayers('demo')).layers.has('sources.yaml')).toBe(false);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
       tmp.cleanup();
     }
   });
@@ -249,21 +374,137 @@ describe('project store: sources*.yaml layers', () => {
       tmp.write('sources.local.yaml', 'local');
       tmp.write('sources.private.yaml', 'private');
       tmp.write('not-a-layer.yaml', 'ignored');
-      const layers = await store.readSourceLayers('demo');
+      const { layers, errors } = await store.readSourceLayers('demo');
+      expect(errors).toEqual([]);
       expect([...layers.keys()]).toEqual(['sources.local.yaml', 'sources.private.yaml', 'sources.yaml']);
       expect(layers.get('sources.yaml')).toBe('base');
-      expect(await store.readSourceLayers('missing-project')).toEqual(new Map());
+      expect(await store.readSourceLayers('missing-project')).toEqual({ layers: new Map(), errors: [] });
     } finally {
       tmp.cleanup();
     }
   });
 
-  test('isSourcesFileName matches every layer and nothing else', () => {
-    expect(isSourcesFileName('sources.yaml')).toBe(true);
-    expect(isSourcesFileName('sources.private.yaml')).toBe(true);
-    expect(isSourcesFileName('sources.hml-1.private.yaml')).toBe(true);
-    expect(isSourcesFileName('sources.other.yaml')).toBe(false);
-    expect(isSourcesFileName('settings.yaml')).toBe(false);
+  test('a file over MAX_FILE_BYTES is reported, not read (parity with the plugin decoder)', async () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      const huge = `environments: [local]\n# ${'x'.repeat(MAX_FILE_BYTES)}`;
+      tmp.write('sources.yaml', 'environments: [local]\n');
+      tmp.write('sources.local.yaml', huge);
+      await store.replace('demo', FRAMES_DIR, ['main'], [], [
+        file('main/step-1/flow.md', 'small\nbig'),
+        file('main/step-1/small.md', 'tiny')
+      ]);
+      // the store refuses to write an oversized file, so it is planted on disk directly
+      tmp.write('frames/main/step-1/big.md', huge);
+
+      // the oversized layer is skipped and named in errors; the readable one still comes through
+      const layers = await store.readSourceLayers('demo');
+      expect([...layers.layers.keys()]).toEqual(['sources.yaml']);
+      expect(layers.errors).toEqual([`sources.local.yaml: larger than ${MAX_FILE_BYTES} bytes, not read`]);
+
+      // the oversized card is skipped the same way, and the rest of the frame is untouched
+      const listed = await store.list('demo', FRAMES_DIR);
+      expect(listed.files.map((f) => f.path)).toEqual(['main/step-1/flow.md', 'main/step-1/small.md']);
+      expect(listed.errors).toEqual([`main/step-1/big.md: larger than ${MAX_FILE_BYTES} bytes, not read`]);
+
+      // exactly at the limit is still read
+      tmp.write('sources.dev.yaml', 'x'.repeat(MAX_FILE_BYTES));
+      const atLimit = await store.readSourceLayers('demo');
+      expect([...atLimit.layers.keys()]).toContain('sources.dev.yaml');
+      expect(atLimit.errors).toEqual([`sources.local.yaml: larger than ${MAX_FILE_BYTES} bytes, not read`]);
+    } finally {
+      tmp.cleanup();
+    }
+  });
+
+  test('isSourcesFileName recognizes every sources*.yaml name, so a bogus one can be reported', () => {
+    // the four canonical layers
+    for (const name of ['sources.yaml', 'sources.private.yaml', 'sources.hml.yaml', 'sources.hml-1.private.yaml']) {
+      expect(isSourcesFileName(name)).toBe(true);
+    }
+    // Recognized (read) but not a valid layer. This is the recognition grammar, not the write
+    // grammar: docs/project-format.md ("Sources" > Validation) makes both "a sources.{x}
+    // [.private].yaml file whose {x} is not in environments" and "any other sources.*.yaml file
+    // name" errors reported in `errors`, and a file that is never read can never be reported,
+    // counted, or deleted on save. `other` and `local` are the same shape, and sources.local.yaml
+    // has to be read (see "readSourceLayers returns the layers on disk"). Same grammar as the
+    // plugin's read-only ProjectDir.LAYER, so both sides read the same files.
+    expect(isSourcesFileName('sources.other.yaml')).toBe(true);
+    expect(isSourcesFileName('sources.yaml.yaml')).toBe(true);
+    expect(isSourcesFileName('sources.a.b.yaml')).toBe(true);
+    // not a sources file at all
+    for (const name of ['settings.yaml', 'sources.yml', 'sources', 'not-a-layer.yaml', 'sources.yaml.md', '']) {
+      expect(isSourcesFileName(name)).toBe(false);
+    }
+    // attack cases: a path, an empty segment, an encoded separator, a null byte
+    for (const name of [
+      '../sources.yaml',
+      'sources.a/b.yaml',
+      'sources..yaml',
+      'sources.%2Eyaml',
+      'sources\u0000.yaml',
+      'sources.private.yaml/x',
+      'sources.local.yaml.bak'
+    ]) {
+      expect(isSourcesFileName(name)).toBe(false);
+    }
+  });
+
+  test('isSourceLayerFileName accepts only the four writable layers', () => {
+    for (const name of ['sources.yaml', 'sources.private.yaml', 'sources.local.yaml', 'sources.hml-1.private.yaml']) {
+      expect(isSourceLayerFileName(name)).toBe(true);
+    }
+    for (const name of [
+      // a reserved or malformed {env}
+      'sources.private.private.yaml',
+      'sources.Local.yaml',
+      'sources.local.PRIVATE.yaml',
+      'sources.a_b.yaml',
+      'sources.-local.yaml',
+      'sources.local-.yaml',
+      'sources..yaml',
+      'sources.yaml.yaml.yaml',
+      // not at the testframe/ root, not a layer, not a name
+      '../sources.yaml',
+      'sources.a/b.yaml',
+      'frames/sources.yaml',
+      'sources.yml',
+      'other.yaml',
+      'sources.yaml/x',
+      'sources\u0000.yaml',
+      'sources.%2Eprivate.yaml',
+      ''
+    ]) {
+      expect(isSourceLayerFileName(name)).toBe(false);
+    }
+  });
+
+  test('a bogus sources file is read, reported and dropped on save', async () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      tmp.write('sources.yaml', 'environments: [local]\n');
+      tmp.write('sources.other.yaml', 'openapi: {}\n');
+      tmp.write('sources.a.b.yaml', 'openapi: {}\n');
+      tmp.write('settings.yaml', 'openapi: {}\n');
+
+      const { layers } = await store.readSourceLayers('demo');
+      expect([...layers.keys()]).toEqual(['sources.a.b.yaml', 'sources.other.yaml', 'sources.yaml']);
+
+      // a recognized-but-invalid name surfaces as a validation error instead of being ignored
+      const { errors } = readModel(layers);
+      expect(errors).toContain('sources.other.yaml: environment "other" is not in the environments list of sources.yaml');
+      expect(errors.some((e) => e.startsWith('sources.a.b.yaml: not a sources layer'))).toBe(true);
+      // ...and is classified, so a sources save deletes it instead of leaving it behind
+      expect(classify('sources.other.yaml')).toEqual({ kind: 'env', env: 'other', isPrivate: false });
+
+      // the write side stays narrow: a bogus name is refused, it is never created at the root
+      expect(async () => store.writeSourceLayers('demo', new Map([['sources.other.private.private.yaml', 'x']]), [])).toThrow(ApiError);
+      expect(existsSync(path.join(tmp.testframeDir, 'sources.other.private.private.yaml'))).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
   });
 });
 

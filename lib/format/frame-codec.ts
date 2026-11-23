@@ -105,7 +105,7 @@ export function read(files: ProjectFile[], results: Map<string, CardRun> = new M
   for (const file of files) {
     const fl = FLOW_PATH.exec(file.path);
     if (fl) {
-      flows.set(`${fl[1]}/step-${fl[2]}`, flowEntries(file));
+      flows.set(`${fl[1]}/step-${Number(fl[2])}`, flowEntries(file));
       continue;
     }
     const m = PRIVATE_PATH.exec(file.path);

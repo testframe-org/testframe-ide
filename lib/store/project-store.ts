@@ -1,26 +1,54 @@
-import { existsSync, promises as fs } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, lstatSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { ApiError } from '../format/errors';
 import type { ProjectFile } from '../format/types';
 
 // Storage of the projects under the projects root ({root}/{project}/testframe/...). Every path
 // that comes from a request is validated here (security-sensitive, port of the Java
-// ProjectFileStore): `..` is stripped, a character whitelist applies, the resolved path must stay
-// under its base directory, only `.md` files are written under frames/, the sources*.yaml layers
-// only at the testframe/ root with their exact file-name grammar, the build cache only as `.json`
-// files under testframe/.testframebuild/, and a replace scope can never be the frames/ root.
+// ProjectFileStore): such a path goes through resolveRequestPath, which refuses `..` outright and
+// then delegates to resolveUnder, the containment primitive (relative paths only, a character
+// whitelist and a length cap, `..` stripped rather than followed, the result kept under its base
+// directory, and no symlink anywhere below the projects root). Only `.md` files are written under
+// frames/, the sources*.yaml layers only at the testframe/ root with their exact file-name
+// grammar, the build cache only as `.json` files under testframe/.testframebuild/, and a replace
+// scope can never be the frames/ root.
 
 export const TESTFRAME_DIR = 'testframe';
 export const FRAMES_DIR = 'testframe/frames';
 export const BUILD_DIR = '.testframebuild';
+
+/**
+ * Largest project file (docs/project-format.md, "File size"). A bigger one is reported and
+ * skipped, never read — the same limit and the same message as the plugin's read-only
+ * `ProjectDir.MAX_FILE_BYTES`, so both sides of the format agree on which files exist — and the
+ * store never writes one: a save holding a bigger file is a 400 before anything is written (a
+ * file saved over the limit would be skipped on the next load and pruned by the next save).
+ */
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 /** testframe/.gitignore, written by the IDE: private files and the build cache. */
 export const GITIGNORE_LINES = ['*.private.md', '*.private.yaml', `${BUILD_DIR}/`];
 const GITIGNORE_HEADER = '# Written by the TestFrame IDE: private data and the IDE build cache are never versioned';
 
 const SAFE_PATH = /^[A-Za-z0-9 ._/\-À-ǿ]+$/;
-const SOURCE_LAYER = /^sources(\.[a-z0-9]+(-[a-z0-9]+)*)?(\.private)?\.yaml$/;
 const BUILD_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+/** An environment name segment: kebab-case, and `private` is reserved (docs/project-format.md). */
+const ENV_SEGMENT = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/**
+ * Recognizes the sources files at the `testframe/` root so they are READ and their name is
+ * validated by the sources layer. Deliberately broader than {@link isSourceLayerFileName} (which
+ * decides what may be WRITTEN): the spec makes "a `sources.{x}[.private].yaml` file whose `{x}`
+ * is not in `environments`" and "any other `sources.*.yaml` file name" validation errors, and an
+ * unread file can never be reported. Same grammar as the plugin's read-only decoder
+ * (`ProjectDir.LAYER`), so both sides read the same set of files.
+ */
+const SOURCES_FILE_NAME = /^sources(\.[A-Za-z0-9_-]+)*\.yaml$/;
+
+/** A project path is a name, not a document: these caps keep an oversized value off the disk. */
+const MAX_PATH_LENGTH = 1024;
+const MAX_SEGMENT_LENGTH = 255;
 
 export interface SaveResult {
   project: string;
@@ -38,6 +66,9 @@ export interface ProjectSummary {
 
 const bad = (message: string) => new ApiError(400, message);
 
+/** A rejected name inside an error message, truncated: an oversized value is never echoed back. */
+const show = (value: string): string => (value.length > 120 ? `${value.slice(0, 120)}...` : value);
+
 export class ProjectStore {
   readonly root: string;
 
@@ -47,25 +78,73 @@ export class ProjectStore {
 
   // ------------------------------------------------------------------ path validation
 
-  /** Resolves `relative` under `baseDir`: strips `..`, whitelists characters, stays inside. */
+  /**
+   * Resolves a name that came from a request (project, frame, card, scope, stale file) under
+   * `baseDir`. Deny by default: a legitimate name never contains `..`, so it is rejected here
+   * instead of being silently rewritten into something the caller did not ask for.
+   */
+  resolveRequestPath(relative: string | null | undefined, baseDir: string): string {
+    if (typeof relative === 'string' && relative.includes('..')) throw bad(`Path traversal is not allowed: ${show(relative)}`);
+    return this.resolveUnder(relative, baseDir);
+  }
+
+  /**
+   * Containment primitive: resolves `relative` under `baseDir` and proves the result stays there.
+   * Relative paths only, inside the length caps and the character whitelist; `..` is removed
+   * (never followed), so a traversal attempt lands back inside the base; and no component below
+   * the projects root may be a symlink. Lexical apart from `lstat`: a link is never followed to
+   * decide where a write lands.
+   */
   resolveUnder(relative: string | null | undefined, baseDir: string): string {
     if (relative === null || relative === undefined || relative.trim() === '') throw bad('Invalid project/file name');
-    const cleaned = relative.replaceAll('..', '').trim();
-    if (!SAFE_PATH.test(cleaned)) throw bad(`Invalid character in path: ${relative}`);
+    const trimmed = relative.trim();
+    if (path.isAbsolute(trimmed)) throw bad(`Absolute paths are not allowed: ${show(trimmed)}`);
+    if (trimmed.length > MAX_PATH_LENGTH || trimmed.split('/').some((s) => s.length > MAX_SEGMENT_LENGTH)) throw bad('Path is too long');
+    const cleaned = trimmed.replaceAll('..', '').replace(/^\/+/, '');
+    if (cleaned === '') throw bad('Invalid project/file name');
+    if (!SAFE_PATH.test(cleaned)) throw bad(`Invalid character in path: ${show(trimmed)}`);
     const resolved = path.resolve(baseDir, cleaned);
     if (resolved !== baseDir && !resolved.startsWith(baseDir + path.sep)) throw bad('Path outside the projects directory');
+    this.assertNoSymlink(resolved);
     return resolved;
+  }
+
+  /**
+   * Rejects a target reached through a symlink: every component of `target` below the projects
+   * root must be a real entry, or a link planted inside a project would carry a write outside it
+   * (the plugin reads with NOFOLLOW_LINKS; this is the write side of the same rule).
+   */
+  private assertNoSymlink(target: string): void {
+    const relative = path.relative(this.root, target);
+    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return;
+    let current = this.root;
+    for (const segment of relative.split(path.sep)) {
+      if (segment === '') continue;
+      current = path.join(current, segment);
+      let stats;
+      try {
+        stats = lstatSync(current);
+      } catch {
+        return; // nothing on disk yet, so nothing to follow
+      }
+      if (stats.isSymbolicLink()) throw bad(`Symbolic links are not allowed in a project path: ${show(relative)}`);
+    }
   }
 
   /** {root}/{project}: never the projects root itself. */
   projectDir(project: string | null | undefined): string {
-    const dir = this.resolveUnder(project, this.root);
-    if (dir === this.root) throw bad(`Invalid project name: ${project}`);
+    const dir = this.resolveRequestPath(project, this.root);
+    if (dir === this.root) throw bad(`Invalid project name: ${show(project ?? '')}`);
     return dir;
   }
 
   testframeDir(project: string): string {
     return path.join(this.projectDir(project), TESTFRAME_DIR);
+  }
+
+  /** {root}/{project}/{subDir}: the sub-directory is validated like any request-supplied path. */
+  private projectSubDir(project: string, subDir: string): string {
+    return this.resolveRequestPath(subDir, this.projectDir(project));
   }
 
   // ------------------------------------------------------------------ .md files (frames)
@@ -78,23 +157,25 @@ export class ProjectStore {
    * anything touches the disk.
    */
   async replace(project: string, subDir: string, scopes: string[], staleFiles: string[], files: ProjectFile[]): Promise<SaveResult> {
-    const dir = path.join(this.projectDir(project), subDir);
+    const dir = this.projectSubDir(project, subDir);
     const targets = new Map<string, string>();
     for (const file of files) {
-      const target = this.resolveUnder(file.path, dir);
-      if (!target.endsWith('.md')) throw bad(`Only .md files can be stored: ${file.path}`);
-      targets.set(target, file.content ?? '');
+      const target = this.resolveRequestPath(file.path, dir);
+      if (!target.endsWith('.md')) throw bad(`Only .md files can be stored: ${show(file.path)}`);
+      const content = file.content ?? '';
+      checkSize(file.path, content);
+      targets.set(target, content);
     }
     const scopeDirs: string[] = [];
     for (const scope of new Set(scopes)) {
-      const scopeDir = this.resolveUnder(scope, dir);
-      if (scopeDir === dir) throw bad(`Invalid scope: ${scope}`);
+      const scopeDir = this.resolveRequestPath(scope, dir);
+      if (scopeDir === dir) throw bad(`Invalid scope: ${show(scope)}`);
       scopeDirs.push(scopeDir);
     }
     const stalePaths: string[] = [];
     for (const stale of new Set(staleFiles)) {
-      const stalePath = this.resolveUnder(stale, dir);
-      if (!stalePath.endsWith('.md')) throw bad(`Only .md files can be removed: ${stale}`);
+      const stalePath = this.resolveRequestPath(stale, dir);
+      if (!stalePath.endsWith('.md')) throw bad(`Only .md files can be removed: ${show(stale)}`);
       stalePaths.push(stalePath);
     }
 
@@ -108,39 +189,60 @@ export class ProjectStore {
     return { project, root: dir, saved: targets.size, removed };
   }
 
-  /** Every `.md` file under `subDir`, paths relative to it, sorted by path. */
-  async list(project: string, subDir: string): Promise<ProjectFile[]> {
-    const dir = path.join(this.projectDir(project), subDir);
+  /**
+   * Every `.md` file under `subDir`, paths relative to it, sorted by path. A file over
+   * {@link MAX_FILE_BYTES} is skipped and reported in `errors` instead of being read.
+   */
+  async list(project: string, subDir: string): Promise<{ files: ProjectFile[]; errors: string[] }> {
+    const dir = this.projectSubDir(project, subDir);
     const paths = (await walkFiles(dir)).filter((p) => p.endsWith('.md')).sort();
-    return Promise.all(
-      paths.map(async (p) => ({ path: path.relative(dir, p).split(path.sep).join('/'), content: await fs.readFile(p, 'utf8') }))
+    const read = await Promise.all(
+      paths.map(async (p) => {
+        const rel = path.relative(dir, p).split(path.sep).join('/');
+        return { rel, content: await readCapped(p) };
+      })
     );
+    return {
+      files: read.flatMap((r) => (r.content === null ? [] : [{ path: r.rel, content: r.content }])),
+      errors: read.flatMap((r) => (r.content === null ? [oversizeProblem(r.rel)] : []))
+    };
   }
 
   // ------------------------------------------------------------------ sources*.yaml layers
 
-  /** The sources*.yaml layer files at the testframe/ root (file name -> content), sorted by name. */
-  async readSourceLayers(project: string): Promise<Map<string, string>> {
+  /**
+   * The sources*.yaml layer files at the testframe/ root (file name -> content), sorted by name. A
+   * layer over {@link MAX_FILE_BYTES} is skipped and reported in `errors` instead of being read.
+   */
+  async readSourceLayers(project: string): Promise<{ layers: Map<string, string>; errors: string[] }> {
     const dir = this.testframeDir(project);
-    const out = new Map<string, string>();
+    const layers = new Map<string, string>();
+    const errors: string[] = [];
     let names: string[];
     try {
       names = (await fs.readdir(dir, { withFileTypes: true })).filter((e) => e.isFile()).map((e) => e.name);
     } catch {
-      return out;
+      return { layers, errors };
     }
-    for (const name of names.filter(isSourcesFileName).sort()) out.set(name, await fs.readFile(path.join(dir, name), 'utf8'));
-    return out;
+    for (const name of names.filter(isSourcesFileName).sort()) {
+      const content = await readCapped(path.join(dir, name));
+      if (content === null) errors.push(oversizeProblem(name));
+      else layers.set(name, content);
+    }
+    return { layers, errors };
   }
 
   /** Writes the given layer files and deletes the `remove` ones (names validated first). */
   async writeSourceLayers(project: string, files: Map<string, string>, remove: string[]): Promise<SaveResult> {
     const dir = this.testframeDir(project);
     const check = (name: string) => {
-      if (!SOURCE_LAYER.test(name)) throw bad(`Not a sources layer file name: ${name}`);
-      return this.resolveUnder(name, dir);
+      if (!isSourceLayerFileName(name)) throw bad(`Not a sources layer file name: ${show(name)}`);
+      return this.resolveRequestPath(name, dir);
     };
-    const targets = [...files].map(([name, content]) => [check(name), content] as const);
+    const targets = [...files].map(([name, content]) => {
+      checkSize(name, content);
+      return [check(name), content] as const;
+    });
     const removals = remove.map(check);
     for (const [target, content] of targets) await writeAtomic(target, content);
     let removed = 0;
@@ -237,14 +339,65 @@ export class ProjectStore {
   }
 }
 
-/** `sources.yaml` and every `sources.*.yaml` (validated by the sources layer, not here). */
-export const isSourcesFileName = (name: string): boolean => name === 'sources.yaml' || /^sources\..+\.yaml$/.test(name);
+/**
+ * Whether `name` is a sources file of the `testframe/` root, i.e. whether the store reads it as a
+ * layer candidate. This is the RECOGNITION grammar, not the write grammar: it accepts every
+ * `sources.{segment}...yaml` shape so that a bogus one is read and then reported by the sources
+ * validation ("any other `sources.*.yaml` file name" is a validation error, and a file that is
+ * never read can never be reported, deleted on save, or counted). Identical to the plugin's
+ * read-only `ProjectDir.LAYER`, so both sides read the same files. It still rejects a path
+ * (`sources.a/b.yaml`), an empty or non-whitelisted segment (`sources..yaml`, `sources.%2E.yaml`,
+ * a null byte) and any other extension.
+ */
+export const isSourcesFileName = (name: string): boolean => SOURCES_FILE_NAME.test(name);
 
+/**
+ * Whether `name` is one of the four layer files the store may WRITE at the `testframe/` root
+ * (docs/project-format.md, "Sources"): `sources.yaml`, `sources.private.yaml`,
+ * `sources.{env}.yaml`, `sources.{env}.private.yaml`, with `{env}` a kebab-case environment name
+ * (`private` is reserved, so the two never overlap). Deny by default: any other shape is refused,
+ * which keeps a write inside the `testframe/` root and keeps a secret-bearing `.private.yaml`
+ * from being created under an arbitrary name.
+ */
+export function isSourceLayerFileName(name: string): boolean {
+  if (!name.endsWith('.yaml')) return false;
+  const parts = name.slice(0, -'.yaml'.length).split('.');
+  if (parts[0] !== 'sources' || parts.length > 3) return false;
+  const middle = parts.slice(1);
+  if (middle.length === 0) return true; // sources.yaml
+  if (middle.length === 1) return middle[0] === 'private' || isEnvSegment(middle[0]!); // sources.private.yaml | sources.{env}.yaml
+  return middle[1] === 'private' && isEnvSegment(middle[0]!); // sources.{env}.private.yaml
+}
+
+const isEnvSegment = (segment: string): boolean => ENV_SEGMENT.test(segment) && segment !== 'private';
+
+/** The problem reported for a file that was skipped for being over {@link MAX_FILE_BYTES}. */
+const oversizeProblem = (rel: string): string => `${rel}: larger than ${MAX_FILE_BYTES} bytes, not read`;
+
+/** Refuses (400) a file the store would not read back: over {@link MAX_FILE_BYTES} once encoded. */
+function checkSize(rel: string, content: string): void {
+  if (Buffer.byteLength(content, 'utf8') > MAX_FILE_BYTES) {
+    throw bad(`${show(rel)}: larger than ${MAX_FILE_BYTES} bytes, not written`);
+  }
+}
+
+/** Reads a project file, or returns null when it is over {@link MAX_FILE_BYTES}. */
+async function readCapped(file: string): Promise<string | null> {
+  const { size } = await fs.stat(file);
+  return size > MAX_FILE_BYTES ? null : fs.readFile(file, 'utf8');
+}
+
+/** Writes through a uniquely named temporary file (two concurrent saves never share one), then renames. */
 async function writeAtomic(target: string, content: string): Promise<void> {
   await fs.mkdir(path.dirname(target), { recursive: true });
-  const tmp = `${target}.tmp`;
-  await fs.writeFile(tmp, content, 'utf8');
-  await fs.rename(tmp, target);
+  const tmp = `${target}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tmp, content, { encoding: 'utf8', flag: 'wx' });
+    await fs.rename(tmp, target);
+  } catch (e) {
+    await fs.rm(tmp, { force: true });
+    throw e;
+  }
 }
 
 async function deleteIfExists(file: string): Promise<boolean> {

@@ -1,5 +1,6 @@
 import { ApiError } from '../format/errors';
 import { reason } from '../openapi/openapi-service';
+import { redact } from '../sources/sources-yaml';
 
 // The IDE's client of the runner plugin (docs/runner-protocol.md, /api/v1). The plugin URL comes
 // from TESTFRAME_RUNNER_URL (and its token, when one is configured, from TESTFRAME_RUNNER_TOKEN);
@@ -10,6 +11,7 @@ export const PROTOCOL = 1;
 
 export interface RunnerHealth {
   status: 'up' | 'down' | 'incompatible' | 'unconfigured';
+  /** The plugin URL without user-info (this answer reaches the browser). */
   url: string | null;
   name?: string;
   version?: string;
@@ -35,6 +37,17 @@ export class RunnerClient {
     return `${this.baseUrl!.replace(/\/+$/, '')}${path}`;
   }
 
+  /** The plugin URL as it may be shown: user-info removed (health reaches the browser). */
+  private shownUrl(): string {
+    return shownUrl(this.baseUrl ?? '');
+  }
+
+  /** An error reason with the configured URL (and any URI user-info) and the token removed. */
+  private safeReason(e: unknown): string {
+    const text = this.baseUrl ? reason(e).split(this.baseUrl).join(this.shownUrl()) : reason(e);
+    return redact(text, this.token ? [this.token] : []);
+  }
+
   private authHeaders(): Record<string, string> {
     return this.token ? { Authorization: `Bearer ${this.token}` } : {};
   }
@@ -52,7 +65,7 @@ export class RunnerClient {
       const body = (await res.json()) as { name?: string; version?: string; protocol?: number; capabilities?: unknown };
       health = {
         status: body.protocol === PROTOCOL ? 'up' : 'incompatible',
-        url: this.baseUrl,
+        url: this.shownUrl(),
         name: body.name,
         version: body.version,
         protocol: body.protocol,
@@ -60,7 +73,7 @@ export class RunnerClient {
         message: body.protocol === PROTOCOL ? undefined : `plugin protocol ${body.protocol}, IDE expects ${PROTOCOL}`
       };
     } catch (e) {
-      health = { status: 'down', url: this.baseUrl, message: `the runner plugin is not reachable at ${this.baseUrl}: ${reason(e)}` };
+      health = { status: 'down', url: this.shownUrl(), message: `the runner plugin is not reachable at ${this.shownUrl()}: ${this.safeReason(e)}` };
     }
     this.cached = { at: Date.now(), health };
     return health;
@@ -86,7 +99,7 @@ export class RunnerClient {
       });
     } catch (e) {
       this.cached = null;
-      throw new ApiError(503, `the runner plugin did not answer at ${this.baseUrl}: ${reason(e)}`);
+      throw new ApiError(503, `the runner plugin did not answer at ${this.shownUrl()}: ${this.safeReason(e)}`);
     }
   }
 
@@ -109,8 +122,21 @@ export class RunnerClient {
         ...(hasBody ? { duplex: 'half' } : {})
       } as RequestInit);
     } catch (e) {
-      throw new ApiError(503, `the runner plugin is not reachable at ${this.baseUrl}: ${reason(e)}`);
+      throw new ApiError(503, `the runner plugin is not reachable at ${this.shownUrl()}: ${this.safeReason(e)}`);
     }
+  }
+}
+
+/** A URL without its user-info (`http://u:p@h:1/x` -> `http://h:1/x`); unparsable text has it cut too. */
+export function shownUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!u.username && !u.password) return url;
+    u.username = '';
+    u.password = '';
+    return u.toString().replace(/\/$/, url.endsWith('/') ? '/' : '');
+  } catch {
+    return url.replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#@]*@/, '$1');
   }
 }
 

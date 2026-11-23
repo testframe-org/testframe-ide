@@ -1,9 +1,11 @@
 # Project format (`{project}/testframe/`)
 
-How a TestFrame project is stored on disk. Contract owner: the framework server —
-`server/.../format/` (envelope, naming rules, catalog, card/source codecs, code rules; unit-tested
-against the reference project byte for byte) and `server/.../store/ProjectFileStore.java`
-(storage, path sanitization, replace semantics). Clients exchange JSON with the API and never
+How a TestFrame project is stored on disk. Contract owner: the IDE —
+`lib/format/` (envelope, naming rules, catalog, card/source codecs, code rules; unit-tested
+against the reference project byte for byte) and `lib/store/project-store.ts`
+(storage, path sanitization, replace semantics). The execution plugin keeps **read-only** Java
+decoders of the same format (`modules/testframe-plugin-spring/.../format/`), held in parity by
+`bun run format:check` at the repo root. Clients exchange JSON with the API and never
 read or write these files themselves. Reference project: `examples/product-test/testframe/`.
 
 The project is in beta: this format changes without migrations or legacy loaders
@@ -71,6 +73,13 @@ because var-names are the binding identity. Source names match `[a-z0-9][a-z0-9_
 least 2 characters). Environment names are kebab-case, `[a-z0-9]+(-[a-z0-9]+)*`, and `private`
 is reserved, so `sources.{a}.yaml` and `sources.{a}.private.yaml` always parse unambiguously.
 The name `.testframebuild` is reserved at the `testframe/` root. Frame names are kebab-case.
+
+**File size.** A project file (card, `flow.md`, `.private.md`, `sources*.yaml` layer) is at most
+2 MiB (2 097 152 bytes, UTF-8). A larger file found on disk is never read: it is reported in
+`errors` as `{path}: larger than 2097152 bytes, not read` (the IDE and the plugin decoders apply
+the same limit). The IDE never writes one: a save that would produce a larger file is rejected
+with 400 (`{path}: larger than 2097152 bytes, not written`) before any file of that save is
+written.
 
 ## Source types and subtypes
 
@@ -200,11 +209,15 @@ the source's resolved `headers`. An operation is `{operationId, method, path, su
 source's `api-base` is `servers[0].url` (resolved against the spec URL), or the spec URL's origin
 when the spec names no server.
 
-The IDE keeps a per-environment cache of each openapi source's operations, keyed by the resolved
-spec URL, under `testframe/.testframebuild/`. Its layout and format are an implementation detail
+The IDE keeps a per-environment cache of each openapi source's operations, keyed by the SHA-256
+of the resolved spec URL (the URL itself is never stored: a private layer may have set it), under
+`testframe/.testframebuild/`. Its layout and format are an implementation detail
 of the IDE, not part of this format: the IDE may rebuild it at any time, nothing else reads it,
 and deleting `.testframebuild/` is always safe. A spec that cannot be read answers 502 (a sources
-save still succeeds and reports it in `warnings`). A run request carries the `api-base` and the
+save still succeeds and reports it in `warnings`); the message names the spec URL only when no
+private layer set it, and the source's secrets are redacted from it. The spec is fetched without
+following redirects, so the source's private headers never reach another host. The `api-base`
+never carries the spec URL's user-info. A run request carries the `api-base` and the
 operations of the run's environment (`docs/runner-protocol.md`); the card editor's operation
 select and the endpoint check on load use the current environment's operations. The plugin
 never reads `.testframebuild/`: for a tour run it fetches each openapi spec it needs once per
@@ -381,8 +394,8 @@ per frame, so a binding is unambiguous.
 
 ## API
 
-The API exchanges structured JSON; the server builds every path and file. Full shapes:
-`server/AGENTS.md`.
+The API exchanges structured JSON; the IDE builds every path and file. Full shapes:
+this module's `AGENTS.md`.
 
 - `GET /api/v2/frames/{project}` → `{frames, errors}`: frames sorted by name, steps renumbered
   from 1 in numeric order, cards in the order of the step's `flow.md`, each with its private
@@ -394,19 +407,34 @@ The API exchanges structured JSON; the server builds every path and file. Full s
 - `POST /api/v2/results` `{project, environment, frame, step, varName, result}`: stores the card's
   last run in `.testframebuild/`.
 - `GET /api/v2/sources/{project}` → `{environments, layers: {base, private, env: {E: {public,
-  private}}}, errors}`: every layer as JSON (same structure as its YAML);
+  private}}}, errors}`: every layer as JSON (same structure as its YAML), except that **private
+  values never leave the IDE**: every string value of a `.private.yaml` layer (`base-url`, each
+  header value) comes back as the marker string `"<private>"` (a `null` removal stays `null`;
+  names and structure are kept, so the editor knows which fields are private).
   `POST /api/v2/sources` `{project, environments, layers}`: rewrites the layer files as in
   "Sources" (then refreshes the current environment's openapi cache; failures come back in
-  `warnings`).
-- `GET /api/v2/sources/openapi/{name}/operations?project=&env=` → `{specUrl, baseUrl, fetchedAt,
-  operations: [{operationId, method, path, summary}]}`, read from that environment's cache.
+  `warnings`, with secrets redacted). A field still holding `"<private>"` keeps the value stored
+  on disk at the same place — same private layer file, type, source and field (header names
+  ignore case); a new value replaces it; a field left out removes it. A marker in a shared layer,
+  or one with no stored value at that place (e.g. after a rename), is a 400: a stored secret is
+  never copied to another layer or source, so it has to be typed again. The editor shows private
+  fields write-only (empty password inputs saying a value is stored).
+- `GET /api/v2/sources/openapi/{name}/operations?project=&env=` → `{baseUrl, fetchedAt,
+  operations: [{operationId, method, path, summary}]}`, read from that environment's cache (the
+  spec URL is not returned: it is the source's base-url, possibly private).
 - Every run takes the environment (`env`); the editor keeps a current-environment selector.
 - `POST /api/v2/run` `{project, frame, steps: [{number, cards}]}` and `POST /api/v2/run/card`
   run cards on the server (execution section above): per-card outcomes with status
   `success`, `error` (the run stops there) or `skipped` (after a false conditional).
 - `POST /api/v2/run/mongo` `{project, source, subtype, collection, body}`: runs one mongo call
   (`body` = the JSON array of arguments).
-- Invalid data is rejected with 400 `{status, message}` before anything is written. The store
+- Invalid data is rejected with 400 `{status, message}` before anything is written; a body that
+  is not `application/json` is a 415. The IDE listens on `127.0.0.1` only, answers only requests
+  addressed to a loopback host name (`localhost`, `127.0.0.1`, `[::1]`; 403 otherwise), and
+  refuses with 403 a state-changing request (any method but GET/HEAD/OPTIONS, the `/api/tour/*`
+  proxy included) whose `Sec-Fetch-Site` is not `same-origin`/`none` or whose `Origin` is not
+  its own. The tour proxy forwards only paths made of `[A-Za-z0-9._-]+` segments (never `.`,
+  `..` or empty, in any encoding) under the plugin's `/api/v1/tour`. The store
   still validates every path: it strips `..`, applies a character whitelist, checks that the
   path stays under the projects dir, accepts only `.md` files (plus the `sources*.yaml` layers at
   the `testframe/` root), and never allows a scope equal to the `frames/` root.
@@ -471,8 +499,5 @@ mongo:
 
 ## Notes
 
-- The client shows one frame at a time: the one named in the header, or the first one on
+- The editor shows one frame at a time: the one named in the header, or the first one on
   disk. Saving writes only that frame.
-- The framework server serves the OpenAPI spec of its own in-test targets
-  (`/api/v2/openapi.json`: `POST /api/v2/echo`, `GET /api/v2/health`), so an openapi source can
-  point at it (the smoke run does).

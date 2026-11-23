@@ -4,7 +4,7 @@ import type { CardRun } from '@/lib/format/types';
 
 /** `{project, environment, frame, step, varName, result}`: stores a card's last run in .testframebuild/. */
 export async function POST(request: Request) {
-  return handle(async () => {
+  return handle(request, async () => {
     const b = (await readJson(request)) as {
       project?: string; environment?: string; frame?: string; step?: number; varName?: string; result?: CardRun;
     };

@@ -57,9 +57,8 @@ describe('frame codec', () => {
     expect(createProduct.privateData).toBeNull();
 
     const written = FrameCodec.write(frame);
-    const expected = byPath(committed);
     expect(written.files.length).toBe(committed.length);
-    for (const file of written.files) expect(file.content).toBe(expected.get(file.path));
+    expect(byPath(written.files)).toEqual(byPath(committed));
   });
 
   test('steps are numbered by position and card order comes from flow.md', () => {
@@ -220,6 +219,17 @@ describe('frame codec', () => {
       'main/step-1/flow.md: ghost.md is listed but the card file is missing',
       'main/step-1/a.md: not listed in flow.md'
     ]);
+    expect(read.frames[0]!.steps![0]!.cards!.map((c) => c.varName)).toEqual(['b', 'a']);
+  });
+
+  test('a zero-padded step folder still uses its flow.md (same as the plugin decoder)', () => {
+    const files: ProjectFile[] = [
+      { path: 'main/step-01/a.md', content: md('A') },
+      { path: 'main/step-01/b.md', content: md('B') },
+      { path: 'main/step-01/flow.md', content: '-------------------\n-------------------\nb\na\n' }
+    ];
+    const read = FrameCodec.read(files);
+    expect(read.errors).toEqual([]);
     expect(read.frames[0]!.steps![0]!.cards!.map((c) => c.varName)).toEqual(['b', 'a']);
   });
 

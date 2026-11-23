@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /** `?project=&env=` -> `{specUrl, baseUrl, fetchedAt, operations}` from that environment's cache. */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
-  return handle(async () => {
+  return handle(request, async () => {
     const q = request.nextUrl.searchParams;
     return services().openApi.spec(q.get('project') ?? '', (await params).name, q.get('env'));
   });

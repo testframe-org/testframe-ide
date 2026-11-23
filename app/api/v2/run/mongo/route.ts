@@ -6,5 +6,5 @@ export const dynamic = 'force-dynamic';
 
 /** `{project, environment, source, subtype, collection, body}`: one mongo call (body = the argument array). */
 export async function POST(request: Request) {
-  return handle(async () => passThrough(await services().runs.runMongo(await readJson(request))));
+  return handle(request, async () => passThrough(await services().runs.runMongo(await readJson(request))));
 }

@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /** `{frames, errors}`; `?env=` picks the environment of the cards' last runs and endpoint checks. */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ project: string }> }) {
-  return handle(async () => {
+  return handle(request, async () => {
     const { project } = await params;
     return services().frames.load(project, request.nextUrl.searchParams.get('env'));
   });

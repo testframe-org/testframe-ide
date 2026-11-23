@@ -9,25 +9,42 @@ export interface SourcesResponse extends SourcesModel {
   errors: string[];
 }
 
-/** The project's sources (the sources*.yaml layers at the testframe/ root). */
+/**
+ * The project's sources (the sources*.yaml layers at the testframe/ root). `load` is the raw
+ * model (server-side only: resolution, runs); `view` is what a route may return — every value of
+ * a `.private.yaml` layer replaced by `Sources.PRIVATE_MARKER`, so a secret never reaches the
+ * browser.
+ */
 export class SourceService {
   constructor(private readonly store: ProjectStore) {}
 
+  /** The masked model for the browser (GET /api/v2/sources/{project}). */
+  async view(project: string): Promise<SourcesResponse> {
+    const { errors, ...model } = await this.load(project);
+    return { ...Sources.maskModel(model), errors };
+  }
+
+  /** The raw model, secrets included: never return it from a route (use `view`). */
   async load(project: string): Promise<SourcesResponse> {
-    const { model, errors } = Sources.readModel(await this.store.readSourceLayers(project));
-    return { ...model, errors };
+    const { layers, errors: readErrors } = await this.store.readSourceLayers(project);
+    const { model, errors } = Sources.readModel(layers);
+    return { ...model, errors: [...readErrors, ...errors] };
   }
 
   /**
    * Validates and rewrites the layer files: sources.yaml, sources.private.yaml and the
    * sources.{env}[.private].yaml of every listed environment; empty layers and every layer of
    * an environment no longer listed are deleted. Invalid data is a 400 with every problem.
+   * The input comes from `view`: a private value still holding the marker keeps the value on
+   * disk (`Sources.unmaskModel`), a marker that cannot be resolved is a 400.
    */
   async save(project: string, input: unknown): Promise<{ result: SaveResult; model: SourcesModel; previous: SourcesModel }> {
-    const { model, errors } = Sources.validateModel(input);
+    const { model: sent, errors } = Sources.validateModel(input);
     if (errors.length) throw new ApiError(400, errors.join('; '), errors);
-    const existing = await this.store.readSourceLayers(project);
+    const { layers: existing } = await this.store.readSourceLayers(project);
     const previous = Sources.readModel(existing).model;
+    const { model, errors: markerErrors } = Sources.unmaskModel(sent, previous);
+    if (markerErrors.length) throw new ApiError(400, markerErrors.join('; '), markerErrors);
     const files = Sources.renderModel(model);
     const remove = [...existing.keys()].filter((name) => !files.has(name) && Sources.classify(name) !== null);
     const result = await this.store.writeSourceLayers(project, files, remove);

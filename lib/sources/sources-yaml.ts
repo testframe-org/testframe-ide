@@ -1,6 +1,9 @@
 import YAML from 'yaml';
 import { NAMED_SOURCE_TYPES } from '../format/catalog';
 import { environmentNameProblem, sourceNameProblem } from '../format/names';
+import { PRIVATE_MARKER } from './private-marker';
+
+export { PRIVATE_MARKER } from './private-marker';
 
 // The project's sources: testframe/sources.yaml (environments + every source declaration) and
 // the layers sources.private.yaml, sources.{env}.yaml, sources.{env}.private.yaml
@@ -200,7 +203,7 @@ function validateEnvironments(value: unknown, errors: string[]): string[] {
   }
   if (!Array.isArray(value) || value.length === 0) {
     errors.push(`${BASE_FILE}: environments: must be a non-empty list of environment names`);
-    return Array.isArray(value) ? [] : [];
+    return [];
   }
   const out: string[] = [];
   for (const env of value) {
@@ -433,7 +436,7 @@ export function resolve(model: SourcesModel, env: string): Map<string, ResolvedS
     const resolvedUrl = baseUrl ? sub(baseUrl.value) : '';
     if (baseUrl?.isPrivate) {
       privateFields.push('base-url');
-      secrets.push(...uriSecrets(resolvedUrl));
+      secrets.push(...secretsOf(resolvedUrl, false));
     }
     const resolvedHeaders: Record<string, string> = {};
     for (const h of [...headers.keys()].sort(byName)) {
@@ -441,7 +444,7 @@ export function resolve(model: SourcesModel, env: string): Map<string, ResolvedS
       resolvedHeaders[h] = sub(w.value);
       if (w.isPrivate) {
         privateFields.push(`headers.${h}`);
-        secrets.push(...headerSecrets(resolvedHeaders[h]!));
+        secrets.push(...secretsOf(resolvedHeaders[h]!, true));
       }
     }
     out.set(ref, {
@@ -458,22 +461,175 @@ export function resolve(model: SourcesModel, env: string): Map<string, ResolvedS
   return out;
 }
 
-const USER_INFO = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/@?#]*)@/;
+const USER_INFO = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#@]*)@/;
+const SCHEME_TOKEN = /^[A-Za-z][A-Za-z0-9._-]*\s+(\S.*)$/;
 
-/** A private URI: the whole value, its user-info `user:password` and the password. */
-function uriSecrets(value: string): string[] {
-  const out = [value];
-  const m = USER_INFO.exec(value);
-  if (m) {
-    const userInfo = m[1]!;
+/** URL-decodes a text (a `+` stays a plus); the text itself when it is not valid encoding. */
+function decode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * The secrets of one private value (docs/runner-protocol.md, "Secrets"; same derivation as the
+ * plugin's `SourcesDecoder.secretsOf`): the whole value; for a URI with user-info also the
+ * password and `user:password`, plus their URL-decoded forms when they differ; for a header value
+ * of the form `{scheme} {token}` also the trimmed token.
+ */
+export function secretsOf(value: string, header: boolean): string[] {
+  const out = new Set<string>();
+  if (!value) return [];
+  out.add(value);
+  const uri = USER_INFO.exec(value);
+  if (uri) {
+    const userInfo = uri[1]!;
     const colon = userInfo.indexOf(':');
-    if (colon >= 0) out.push(userInfo, userInfo.slice(colon + 1));
+    if (colon >= 0) {
+      const password = userInfo.slice(colon + 1);
+      out.add(userInfo);
+      out.add(password);
+      const decoded = decode(password);
+      if (decoded !== password) {
+        out.add(decoded);
+        out.add(decode(userInfo));
+      }
+    }
+  }
+  if (header) {
+    const token = SCHEME_TOKEN.exec(value);
+    if (token) out.add(token[1]!.trim());
+  }
+  out.delete('');
+  return [...out];
+}
+
+// ------------------------------------------------------------------ masking (the browser never sees a secret)
+
+const isPrivateLayerValue = (v: string | null | undefined): v is string => typeof v === 'string';
+
+/** A private layer with every string value replaced by the marker (`null` removals are kept). */
+function maskLayer(layer: LayerData): LayerData {
+  const out: LayerData = {};
+  for (const [type, sources] of Object.entries(layer)) {
+    const typeOut: Record<string, SourceFields> = {};
+    for (const [name, fields] of Object.entries(sources)) {
+      const f: SourceFields = {};
+      if ('base-url' in fields) f['base-url'] = isPrivateLayerValue(fields['base-url']) ? PRIVATE_MARKER : null;
+      if ('headers' in fields) {
+        if (fields.headers == null) f.headers = null;
+        else {
+          const headers: HeaderMap = {};
+          for (const [h, v] of Object.entries(fields.headers)) headers[h] = isPrivateLayerValue(v) ? PRIVATE_MARKER : null;
+          f.headers = headers;
+        }
+      }
+      typeOut[name] = f;
+    }
+    out[type] = typeOut;
   }
   return out;
 }
 
-/** A private header value: the whole value and, for `{scheme} {token}` values, the token. */
-function headerSecrets(value: string): string[] {
-  const m = /^(\S+)\s+(\S.*)$/.exec(value);
-  return m ? [value, m[2]!] : [value];
+/** The model as the browser may see it: every value of a `.private.yaml` layer is the marker. */
+export function maskModel(model: SourcesModel): SourcesModel {
+  const env: Record<string, EnvLayers> = {};
+  for (const [name, layers] of Object.entries(model.layers.env)) {
+    env[name] = { public: layers.public, private: maskLayer(layers.private) };
+  }
+  return { environments: model.environments, layers: { base: model.layers.base, private: maskLayer(model.layers.private), env } };
+}
+
+/** A public layer may not hold the marker: a stored secret is never moved into a committed file. */
+function checkNoMarker(file: string, layer: LayerData, errors: string[]): void {
+  for (const [type, sources] of Object.entries(layer)) {
+    for (const [name, fields] of Object.entries(sources)) {
+      if (fields['base-url'] === PRIVATE_MARKER) {
+        errors.push(`${file}: ${type}.${name}.base-url: a stored private value cannot move to a shared layer (type the value)`);
+      }
+      for (const [h, v] of Object.entries(fields.headers ?? {})) {
+        if (v === PRIVATE_MARKER) errors.push(`${file}: ${type}.${name}.headers.${h}: a stored private value cannot move to a shared layer (type the value)`);
+      }
+    }
+  }
+}
+
+/** A private layer with each marker replaced by the value stored at the same place on disk. */
+function unmaskLayer(file: string, layer: LayerData, stored: LayerData, errors: string[]): LayerData {
+  const out: LayerData = {};
+  const missing = (where: string) => errors.push(`${file}: ${where}: no stored private value to keep (type the value again)`);
+  for (const [type, sources] of Object.entries(layer)) {
+    const typeOut: Record<string, SourceFields> = {};
+    for (const [name, fields] of Object.entries(sources)) {
+      const disk = stored[type]?.[name] ?? {};
+      const f: SourceFields = { ...fields };
+      if (fields['base-url'] === PRIVATE_MARKER) {
+        const kept = disk['base-url'];
+        if (typeof kept === 'string') f['base-url'] = kept;
+        else missing(`${type}.${name}.base-url`);
+      }
+      if (fields.headers) {
+        const headers: HeaderMap = {};
+        for (const [h, v] of Object.entries(fields.headers)) {
+          if (v !== PRIVATE_MARKER) {
+            headers[h] = v;
+            continue;
+          }
+          const diskHeaders = disk.headers ?? {};
+          const key = Object.keys(diskHeaders).find((k) => k.toLowerCase() === h.toLowerCase());
+          const kept = key === undefined ? undefined : diskHeaders[key];
+          if (typeof kept === 'string') headers[h] = kept;
+          else missing(`${type}.${name}.headers.${h}`);
+        }
+        f.headers = headers;
+      }
+      typeOut[name] = f;
+    }
+    out[type] = typeOut;
+  }
+  return out;
+}
+
+/**
+ * Resolves the markers of a model sent by the editor against the model on disk: a marker keeps
+ * the value stored at the same place (same private layer file, type, source, field; header names
+ * ignore case). A marker with nothing stored there, or in a shared layer, is an error — a stored
+ * secret is never copied to another layer or source.
+ */
+export function unmaskModel(model: SourcesModel, stored: SourcesModel): { model: SourcesModel; errors: string[] } {
+  const errors: string[] = [];
+  checkNoMarker(BASE_FILE, model.layers.base, errors);
+  const priv = unmaskLayer(PRIVATE_FILE, model.layers.private, stored.layers.private, errors);
+  const env: Record<string, EnvLayers> = {};
+  for (const [name, layers] of Object.entries(model.layers.env)) {
+    checkNoMarker(envFile(name, false), layers.public, errors);
+    const storedPrivate = stored.layers.env[name]?.private ?? {};
+    env[name] = { public: layers.public, private: unmaskLayer(envFile(name, true), layers.private, storedPrivate, errors) };
+  }
+  return { model: { environments: model.environments, layers: { base: model.layers.base, private: priv, env } }, errors };
+}
+
+// ------------------------------------------------------------------ redaction
+
+/** What a secret is replaced with (the plugin's redactor uses the same token). */
+export const REDACTED = '***';
+
+/**
+ * Removes `secrets` from a text the IDE returns (error messages, warnings): each value raw, in
+ * its JSON-escaped and URL-encoded forms, longest first (values under 4 characters are not
+ * substring-matched); the user-info of any URI is printed as `***@` regardless.
+ */
+export function redact(text: string, secrets: readonly string[]): string {
+  let out = text;
+  const forms = new Set<string>();
+  for (const s of secrets) {
+    if (s.length < 4) continue;
+    forms.add(s);
+    forms.add(JSON.stringify(s).slice(1, -1));
+    forms.add(encodeURIComponent(s));
+  }
+  for (const form of [...forms].sort((a, b) => b.length - a.length)) out = out.split(form).join(REDACTED);
+  return out.replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#@\s]*@/g, `$1${REDACTED}@`);
 }

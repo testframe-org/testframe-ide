@@ -1,0 +1,27 @@
+@import 'tailwindcss' source(none);
+
+/* Only the editor's own sources carry Tailwind classes: the App Router shell and the
+   editor client components (the projects under examples/ are other people's apps). */
+@source '.';
+@source '../editor';
+
+/* Thin, quiet scrollbar for the dark code/result areas of cards and editors */
+@utility scrollbar-dark {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(100 116 139 / 0.55) transparent;
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track,
+  &::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgb(100 116 139 / 0.55);
+    border-radius: 9999px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgb(148 163 184 / 0.8);
+  }
+}

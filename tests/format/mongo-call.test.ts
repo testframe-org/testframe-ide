@@ -107,7 +107,7 @@ describe('mongo call arguments', () => {
       'arg 3 (options): hint must be an index name (string) or an index key object'
     );
     expect(problem('find', '[{}, null, {"hint": {"nome": 1}}]')).toBeNull();
-    expect(problem('find')).toBeNull();
+    expect(problem('find', null)).toBeNull();
   });
 
   test('collation follows the driver keys', () => {

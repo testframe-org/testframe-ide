@@ -4,7 +4,7 @@ import { services } from '@/lib/services/context';
 
 /** `?project=&env=`: fetches the spec again and rewrites that environment's cache. */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ name: string }> }) {
-  return handle(async () => {
+  return handle(request, async () => {
     const q = request.nextUrl.searchParams;
     return services().openApi.refresh(q.get('project') ?? '', (await params).name, q.get('env'));
   });

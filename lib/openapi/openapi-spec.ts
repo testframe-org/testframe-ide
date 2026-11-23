@@ -1,7 +1,13 @@
+import { createHash } from 'node:crypto';
+
 // What an openapi source offers to its cards, distilled from its OpenAPI (or Swagger 2) document:
 // the API base URL (servers[0].url resolved against the spec URL; the spec URL's origin when the
 // document names no server) and the fixed list of operations. This is what the IDE caches per
 // environment in .testframebuild/ (layout private to the IDE).
+//
+// The spec URL is the source's resolved base-url, which may come from a .private.yaml layer
+// (user-info, a token in the query): it is never stored, returned or put in a message. The cache
+// is keyed by its SHA-256 instead, and the API base never carries the spec URL's user-info.
 
 export interface Operation {
   operationId: string;
@@ -10,8 +16,8 @@ export interface Operation {
   summary: string;
 }
 
+/** What the operations endpoint returns and the cache holds (no spec URL). */
 export interface OpenApiSpec {
-  specUrl: string;
   /** The API base requests go to (`apiBase` in the runner protocol). */
   baseUrl: string;
   fetchedAt: string;
@@ -34,9 +40,9 @@ export function parseSpec(specUrl: string, fetchedAt: string, document: string):
   try {
     root = JSON.parse(document ?? '');
   } catch (e) {
-    throw new SpecError(`the spec at ${specUrl} is not JSON: ${(e as Error).message}`);
+    throw new SpecError(`the spec is not JSON: ${(e as Error).message}`);
   }
-  if (!isMap(root) || !isMap(root.paths)) throw new SpecError(`the document at ${specUrl} is not an OpenAPI spec (no "paths")`);
+  if (!isMap(root) || !isMap(root.paths)) throw new SpecError('the document is not an OpenAPI spec (no "paths")');
   const operations: Operation[] = [];
   for (const [p, item] of Object.entries(root.paths)) {
     if (!isMap(item)) continue;
@@ -47,7 +53,7 @@ export function parseSpec(specUrl: string, fetchedAt: string, document: string):
       }
     }
   }
-  return { specUrl, baseUrl: baseUrlOf(specUrl, root), fetchedAt, operations };
+  return { baseUrl: baseUrlOf(specUrl, root), fetchedAt, operations };
 }
 
 function baseUrlOf(specUrl: string, root: Record<string, unknown>): string {
@@ -58,7 +64,11 @@ function baseUrlOf(specUrl: string, root: Record<string, unknown>): string {
     const host = text(root, 'host'); // Swagger 2: host + basePath
     return host ? `${spec.protocol}//${host}${text(root, 'basePath')}` : spec.origin;
   }
-  return new URL(server, spec).toString().replace(/\/+$/, '');
+  const base = new URL(server, spec);
+  // a relative server inherits the spec URL's user-info: credentials never travel in the API base
+  base.username = '';
+  base.password = '';
+  return base.toString().replace(/\/+$/, '');
 }
 
 const normalize = (endpoint: string) => endpoint.trim().replace(/\s+/g, ' ');
@@ -73,16 +83,21 @@ export const hasEndpoint = (spec: OpenApiSpec, endpoint: string): boolean =>
 export const byId = (spec: OpenApiSpec, operationId: string | null | undefined): Operation | undefined =>
   !operationId || !operationId.trim() ? undefined : spec.operations.find((o) => o.operationId === operationId.trim());
 
-/** Reads a cached spec (JSON); null when it is not one. */
-export function fromCache(content: string | null): OpenApiSpec | null {
+/** The cache key of a spec URL: its SHA-256 (hex), so the URL itself is never written. */
+export const specUrlHash = (specUrl: string): string => createHash('sha256').update(specUrl, 'utf8').digest('hex');
+
+/** Reads a cached spec (JSON) made from `specUrl`; null when it is not one or another URL made it. */
+export function fromCache(content: string | null, specUrl: string): OpenApiSpec | null {
   if (!content) return null;
   try {
-    const v = JSON.parse(content) as OpenApiSpec;
-    if (typeof v.specUrl !== 'string' || typeof v.baseUrl !== 'string' || !Array.isArray(v.operations)) return null;
-    return v;
+    const v = JSON.parse(content) as OpenApiSpec & { specUrlHash?: unknown };
+    if (v.specUrlHash !== specUrlHash(specUrl) || typeof v.baseUrl !== 'string' || !Array.isArray(v.operations)) return null;
+    return { baseUrl: v.baseUrl, fetchedAt: String(v.fetchedAt ?? ''), operations: v.operations };
   } catch {
     return null;
   }
 }
 
-export const toCache = (spec: OpenApiSpec): string => `${JSON.stringify(spec, null, 2)}\n`;
+/** The cache file of a spec fetched from `specUrl` (keyed by the URL's hash, never the URL). */
+export const toCache = (spec: OpenApiSpec, specUrl: string): string =>
+  `${JSON.stringify({ specUrlHash: specUrlHash(specUrl), baseUrl: spec.baseUrl, fetchedAt: spec.fetchedAt, operations: spec.operations }, null, 2)}\n`;
