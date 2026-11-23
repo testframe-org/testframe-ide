@@ -2,7 +2,17 @@ import YAML from 'yaml';
 import { NAMED_SOURCE_TYPES } from '../format/catalog';
 import { environmentNameProblem, sourceNameProblem } from '../format/names';
 import { PRIVATE_MARKER } from './private-marker';
-import type { SourceRename } from './source-rename';
+import { SourceRenameSchema } from './sources-yaml.z';
+import type {
+  EnvLayers,
+  HeaderMap,
+  LayerData,
+  LayerKind,
+  ResolvedSource,
+  SourceFields,
+  SourceRename,
+  SourcesModel
+} from './sources-yaml.z';
 
 export { PRIVATE_MARKER } from './private-marker';
 
@@ -10,35 +20,11 @@ export { PRIVATE_MARKER } from './private-marker';
 // the layers sources.private.yaml, sources.{env}.yaml, sources.{env}.private.yaml
 // (agents/specs/project-format.md, "Sources: sources.yaml and its layers"). This module parses,
 // validates, writes (canonical form) and resolves them; the store does the file I/O.
-
-/** header name -> value; null removes the header inherited from an earlier layer. */
-export type HeaderMap = Record<string, string | null>;
-
-/** The fields of one source in one layer; null removes the field inherited from an earlier layer. */
-export interface SourceFields {
-  'base-url'?: string | null;
-  headers?: HeaderMap | null;
-}
-
-/** One layer: type -> source name -> fields (a source with no fields is `{}`). */
-export type LayerData = Record<string, Record<string, SourceFields>>;
-
-export interface EnvLayers {
-  public: LayerData;
-  private: LayerData;
-}
-
-export interface Layers {
-  /** sources.yaml without its `environments` list (that one is SourcesModel.environments). */
-  base: LayerData;
-  private: LayerData;
-  env: Record<string, EnvLayers>;
-}
-
-export interface SourcesModel {
-  environments: string[];
-  layers: Layers;
-}
+//
+// Every shape it works with is declared in sources-yaml.z.ts (one zod schema per shape, the types
+// inferred there) and deliberately **not** re-exported from here: import the types from the schema
+// module. What stays in this file is the format's own wording — the problem messages below are part
+// of the format and must match the plugin's Java decoders byte for byte (`bun run format:check`).
 
 export const BASE_FILE = 'sources.yaml';
 export const PRIVATE_FILE = 'sources.private.yaml';
@@ -53,9 +39,6 @@ const FIELDS_BY_TYPE: Record<string, string[]> = {
 };
 const HEADER_NAME = /^[A-Za-z0-9-]+$/;
 const LAYER_NAME = /^sources\.([a-z0-9]+(?:-[a-z0-9]+)*)(\.private)?\.yaml$/;
-
-/** Where a layer file sits in the stack. */
-export type LayerKind = { kind: 'base' } | { kind: 'private' } | { kind: 'env'; env: string; isPrivate: boolean };
 
 /** The place of a sources*.yaml file name in the stack, or null when the name is not a layer. */
 export function classify(fileName: string): LayerKind | null {
@@ -324,9 +307,8 @@ export function readRenames(input: unknown): SourceRename[] {
   if (!Array.isArray(value)) return [];
   const out: SourceRename[] = [];
   for (const entry of value) {
-    if (!isMap(entry)) continue;
-    const { type, from, to } = entry;
-    if (typeof type === 'string' && typeof from === 'string' && typeof to === 'string') out.push({ type, from, to });
+    const parsed = SourceRenameSchema.safeParse(entry);
+    if (parsed.success) out.push(parsed.data);
   }
   return out;
 }
@@ -402,22 +384,6 @@ export function declaredRefs(model: SourcesModel): string[] {
 }
 
 // ------------------------------------------------------------------ resolution
-
-/** One source resolved for an environment (agents/specs/project-format.md, "Resolution"). */
-export interface ResolvedSource {
-  ref: string;
-  type: string;
-  name: string;
-  /** The resolved base-url ("" when the source is not configured for the environment). */
-  baseUrl: string;
-  /** Resolved headers, names lower-case (openapi). */
-  headers: Record<string, string>;
-  /** Fields whose winning layer is a .private.yaml file (`base-url`, `headers.{name}`). */
-  privateFields: string[];
-  /** Secret strings of this source (runner-protocol.md, "Secrets"). */
-  secrets: string[];
-  configured: boolean;
-}
 
 interface Winner {
   value: string;

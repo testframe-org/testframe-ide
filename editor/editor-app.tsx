@@ -19,8 +19,7 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react';
-import type { SourceRename } from '@/lib/sources/source-rename';
-import type { SourcesModel } from '@/lib/sources/sources-yaml';
+import type { SourceRename, SourcesModel } from '@/lib/sources/sources-yaml.z';
 import { ideApi, runFrameStream, type CardResult, type HealthResponse, type RunEvent } from './api/ide';
 import { problemsOf, reasonOf } from './api/http';
 import { cardTypeOf, defaultSize, defaultTimeout, loadCatalog } from './catalog';

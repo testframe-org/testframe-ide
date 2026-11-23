@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { NextRequest } from 'next/server';
 import { GET as sourcesRoute } from '@/app/api/v2/sources/[project]/route';
 import { saveSources } from '@/lib/services/sources-save';
-import { PRIVATE_MARKER, type SourcesModel } from '@/lib/sources/sources-yaml';
+import { PRIVATE_MARKER } from '@/lib/sources/sources-yaml';
+import type { SourcesModel } from '@/lib/sources/sources-yaml.z';
 import { ApiError } from '@/lib/format/errors';
 import { tmpProject, writeLayers, type TmpProject } from '../helpers/tmp-project';
 

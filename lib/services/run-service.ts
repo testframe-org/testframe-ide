@@ -3,7 +3,7 @@ import { ApiError } from '../format/errors';
 import * as Names from '../format/names';
 import type { Card } from '../format/types';
 import type { OpenApiService } from '../openapi/openapi-service';
-import type { ResolvedSource } from '../sources/sources-yaml';
+import type { ResolvedSource } from '../sources/sources-yaml.z';
 import type { RunnerClient } from './runner-client';
 import type { SourceService } from './source-service';
 

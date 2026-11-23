@@ -10,6 +10,7 @@ import * as Catalog from '../lib/format/catalog';
 import * as FrameCodec from '../lib/format/frame-codec';
 import type { Card } from '../lib/format/types';
 import * as Sources from '../lib/sources/sources-yaml';
+import type { ResolvedSource } from '../lib/sources/sources-yaml.z';
 import { FRAMES_DIR, ProjectStore, TESTFRAME_DIR } from '../lib/store/project-store';
 import { parseFlags } from './args';
 
@@ -79,7 +80,7 @@ function cardOf(card: Card): DumpCard {
   };
 }
 
-function resolvedOf(source: Sources.ResolvedSource): DumpSource {
+function resolvedOf(source: ResolvedSource): DumpSource {
   const privateFields = new Set(source.privateFields);
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(source.headers)) {

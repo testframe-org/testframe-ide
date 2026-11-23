@@ -1,4 +1,4 @@
-import type { HeaderMap, LayerData, SourceFields, SourcesModel } from '@/lib/sources/sources-yaml';
+import type { HeaderMap, LayerData, SourceFields, SourcesModel } from '@/lib/sources/sources-yaml.z';
 import { isPrivateMarker } from '@/lib/sources/private-marker';
 
 // Pure helpers over the layered sources model the editor edits (GET/POST /api/v2/sources).

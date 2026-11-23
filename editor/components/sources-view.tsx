@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { AlertCircle, Check, Globe, Lock, Plus, RefreshCw, Save, Trash2, Unlock, Loader2 } from 'lucide-react';
 import { environmentNameProblemCode, sourceNameProblemCode, type EnvironmentNameProblem, type SourceNameProblem } from '@/lib/format/names';
-import type { SourcesModel } from '@/lib/sources/sources-yaml';
+import type { SourcesModel } from '@/lib/sources/sources-yaml.z';
 import { namedSourceTypes } from '../catalog';
 import { useI18n, type TKey } from '../i18n';
 import {

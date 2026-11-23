@@ -6,6 +6,7 @@ import type { Card, CardRun, Frame, FramesResponse } from '../format/types';
 import type { OpenApiService } from '../openapi/openapi-service';
 import { type OpenApiSpec, byId, endpointOf, hasEndpoint } from '../openapi/openapi-spec';
 import * as Sources from '../sources/sources-yaml';
+import type { SourcesModel } from '../sources/sources-yaml.z';
 import { FRAMES_DIR, type ProjectStore, type SaveResult } from '../store/project-store';
 import type { SourceService } from './source-service';
 
@@ -126,7 +127,7 @@ export class FrameService {
   }
 
   /** Cards (in every frame) bound to a source that sources.yaml does not declare. */
-  async undeclaredSourceUses(project: string, model: Sources.SourcesModel): Promise<string[]> {
+  async undeclaredSourceUses(project: string, model: SourcesModel): Promise<string[]> {
     const declared = new Set(Sources.declaredRefs(model));
     const { files } = await this.store.list(project, FRAMES_DIR);
     const read = FrameCodec.read(files);

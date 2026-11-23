@@ -2,7 +2,7 @@ import { ApiError } from '../format/errors';
 import * as Names from '../format/names';
 import { renamedStored } from '../sources/source-rename';
 import * as Sources from '../sources/sources-yaml';
-import type { ResolvedSource, SourcesModel } from '../sources/sources-yaml';
+import type { ResolvedSource, SourcesModel } from '../sources/sources-yaml.z';
 import type { ProjectStore, SaveResult } from '../store/project-store';
 
 /** GET /api/v2/sources/{project}. */

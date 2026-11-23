@@ -26,7 +26,7 @@ All code, comments and docs in English; UI copy goes through i18n (en / pt-BR).
 | `app/` | App Router: the editor page(s) plus the `/api/v2/*` and `/api/tour/*` route handlers |
 | `lib/format/` | **The format**: `md-envelope`, `names`, `card-codec`, `frame-codec`, `catalog`, `code-rules`, `jsonassert-code`, `mongo-call`, `mongo-json`, `strict-json`, `types`, `errors` |
 | `lib/store/project-store.ts` | All disk access: atomic writes, **path sanitization**, `replace(...)` pruning, the `sources*.yaml` layers, `.testframebuild/`, `testframe/.gitignore` |
-| `lib/sources/` | `sources-yaml` (the layered sources: read, merge, validate, canonical write), plus `private-marker` and `source-rename`, the two pieces the editor imports without the YAML parser |
+| `lib/sources/` | `sources-yaml` (the layered sources: read, merge, validate, canonical write), `sources-yaml.z` (its shapes as zod schemas — import the types from here, they are not re-exported), plus `private-marker` and `source-rename`, the two pieces the editor imports without the YAML parser |
 | `lib/services/` | `context` (process-wide services), `frame-service`, `source-service`, `sources-save`, `openapi` consumers, `runner-client`, `run-service` |
 | `lib/openapi/` | `openapi-spec` (a spec distilled to its API base + operations) and `openapi-service` (the `.testframebuild/` operations cache, per environment) |
 | `lib/api/` | `http` (`handle(request, fn)` with the request guard, `readJson`), `tour-proxy` (the validated `/api/tour/*` target), `domain` |

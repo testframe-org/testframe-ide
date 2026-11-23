@@ -10,9 +10,9 @@ import {
   resolve,
   secretsOf,
   unmaskModel,
-  validateModel,
-  type SourcesModel
+  validateModel
 } from '@/lib/sources/sources-yaml';
+import type { SourcesModel } from '@/lib/sources/sources-yaml.z';
 
 // The layered sources (agents/specs/project-format.md, "Sources"): merge order, null removal, header
 // names across layers, {env} substitution, the secrets of private values (same derivation as the

@@ -1,5 +1,6 @@
 import { ApiError } from '../format/errors';
-import { type ResolvedSource, redact } from '../sources/sources-yaml';
+import { redact } from '../sources/sources-yaml';
+import type { ResolvedSource } from '../sources/sources-yaml.z';
 import type { SourceService } from '../services/source-service';
 import type { ProjectStore } from '../store/project-store';
 import { type OpenApiSpec, SpecError, fromCache, parseSpec, toCache } from './openapi-spec';

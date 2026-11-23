@@ -1,16 +1,10 @@
-import type { EnvLayers, LayerData, SourceFields, SourcesModel } from './sources-yaml';
+import type { EnvLayers, LayerData, SourceFields, SourceRename, SourcesModel } from './sources-yaml.z';
 
 // Renaming a declared source, shared by both sides of the sources API: the editor renames the
 // masked model it holds, and a save applies the same renames to the model read from disk so the
 // source's stored private values answer the markers sent under its new name. A module of its own
-// (like private-marker.ts) so the editor can import it without pulling in the YAML parser.
-
-/** A source rename the editor made since it read the model: `{type}/{from}` became `{type}/{to}`. */
-export interface SourceRename {
-  type: string;
-  from: string;
-  to: string;
-}
+// (like private-marker.ts) so the editor can import it without pulling in the YAML parser; the
+// shapes come from sources-yaml.z.ts, which is types and schemas only.
 
 /**
  * The model with `from` renamed to `to` under `type`, in every layer that mentions it. One

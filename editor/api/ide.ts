@@ -4,8 +4,7 @@ import type { OpenApiSpec } from '@/lib/openapi/openapi-spec';
 import type { RunnerHealth } from '@/lib/services/runner-client';
 import type { SourcesResponse } from '@/lib/services/source-service';
 import type { SourcesSaveResponse } from '@/lib/services/sources-save';
-import type { SourceRename } from '@/lib/sources/source-rename';
-import type { SourcesModel } from '@/lib/sources/sources-yaml';
+import type { SourceRename, SourcesModel } from '@/lib/sources/sources-yaml.z';
 import type { ProjectSummary, SaveResult } from '@/lib/store/project-store';
 import { ApiError, requestJson } from './http';
 
