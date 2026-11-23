@@ -1,13 +1,10 @@
 name: CI
 
-# The IDE compiles against its sibling folders in the superproject (testframe-org/testframe):
-# modules/jsonassert (the jsonassert-js engine) and modules/testframe-tour-ui (the tour screens).
-# The `ide` job therefore checks out the superproject and puts this repository's commit in place of
-# its modules/testframe-ide submodule. The full stack (plugin, smoke, format parity) runs in the
-# superproject's CI.
-#
-# Requires the repository secret SUPERPROJECT_TOKEN: a fine-grained PAT with read-only "Contents"
-# access to the private superproject testframe-org/testframe. Its submodules are public.
+# The IDE compiles against two sibling folders of the superproject layout: modules/jsonassert (the
+# jsonassert-js engine) and modules/testframe-tour-ui (the tour screens), both public repos. The
+# `ide` job rebuilds that layout from them — this commit at modules/testframe-ide, the siblings at
+# their default branch — so it needs no secret and never reads the private superproject. The full
+# stack (plugin, smoke, format parity, the pinned submodule commits) runs in the superproject's CI.
 
 on:
   push:
@@ -23,21 +20,20 @@ jobs:
     name: IDE (test + typecheck + build)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout the superproject
-        uses: actions/checkout@v4
-        with:
-          repository: testframe-org/testframe
-          token: ${{ secrets.SUPERPROJECT_TOKEN }}
-          persist-credentials: false
-      - name: Checkout the sibling submodules (jsonassert, tour UI)
-        run: |
-          # .gitmodules uses SSH URLs; the submodules are public, so clone them anonymously.
-          git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git submodule update --init --recursive --depth 1 modules/jsonassert modules/testframe-tour-ui
       - name: Checkout this commit as modules/testframe-ide
         uses: actions/checkout@v4
         with:
           path: modules/testframe-ide
+      - name: Checkout the jsonassert engines as modules/jsonassert
+        uses: actions/checkout@v4
+        with:
+          repository: jsonassert/jsonassert-lang
+          path: modules/jsonassert
+      - name: Checkout the tour UI as modules/testframe-tour-ui
+        uses: actions/checkout@v4
+        with:
+          repository: testframe-org/testframe-tour-ui
+          path: modules/testframe-tour-ui
       - uses: oven-sh/setup-bun@v2
       - name: Install
         run: |
