@@ -4,7 +4,8 @@ name: CI
 # jsonassert-js engine) and modules/testframe-tour-ui (the tour screens), both public repos. The
 # `ide` job rebuilds that layout from them — this commit at modules/testframe-ide, the siblings at
 # their default branch — so it needs no secret and never reads the private superproject. The full
-# stack (plugin, smoke, format parity, the pinned submodule commits) runs in the superproject's CI.
+# stack (plugin, smoke, format parity) is verified locally (repo-root AGENTS.md, "Verification before
+# finishing"); the superproject has no CI.
 
 on:
   push:
@@ -35,6 +36,9 @@ jobs:
           repository: testframe-org/testframe-tour-ui
           path: modules/testframe-tour-ui
       - uses: oven-sh/setup-bun@v2
+        with:
+          # the bun the lockfiles were written with (package.json > packageManager)
+          bun-version-file: modules/testframe-ide/package.json
       - name: Install
         run: |
           (cd modules/jsonassert/modules/jsonassert-js && bun install --frozen-lockfile)
@@ -77,6 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
       - name: Install
         working-directory: examples/product-test/examples-components/product-web
         run: bun install --frozen-lockfile

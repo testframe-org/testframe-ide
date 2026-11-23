@@ -2,6 +2,7 @@
   "name": "testframe-ide",
   "private": true,
   "type": "module",
+  "packageManager": "bun@1.3.14",
   "description": "TestFrame IDE (Next.js): the authoring side. Owns the project format (frames, cards, the sources*.yaml layers) and edits it; runs cards through the runner plugin (TESTFRAME_RUNNER_URL). Module scripts under scripts/ take every setting as parameters.",
   "scripts": {
     "dev": "next dev",
