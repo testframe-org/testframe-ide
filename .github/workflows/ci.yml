@@ -1,5 +1,14 @@
 name: CI
 
+# The IDE compiles against its sibling folders in the superproject (testframe-org/testframe):
+# modules/jsonassert (the jsonassert-js engine) and modules/testframe-tour-ui (the tour screens).
+# The `ide` job therefore checks out the superproject and puts this repository's commit in place of
+# its modules/testframe-ide submodule. The full stack (plugin, smoke, format parity) runs in the
+# superproject's CI.
+#
+# Requires the repository secret SUPERPROJECT_TOKEN: a fine-grained PAT with read-only "Contents"
+# access to testframe-org/testframe. The jsonassert submodule is public.
+
 on:
   push:
     branches: [main]
@@ -10,52 +19,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  server:
-    name: server (Spring Boot)
+  ide:
+    name: IDE (test + typecheck + build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Checkout jsonassert engine
+      - name: Checkout the superproject
         uses: actions/checkout@v4
         with:
-          repository: jsonassert/jsonassert-lang
-          path: .deps/jsonassert
-      - uses: actions/setup-java@v4
+          repository: testframe-org/testframe
+          token: ${{ secrets.SUPERPROJECT_TOKEN }}
+          persist-credentials: false
+      - name: Checkout the jsonassert submodule
+        run: |
+          git config --global url."https://github.com/".insteadOf "git@github.com:"
+          git submodule update --init --depth 1 modules/jsonassert
+      - name: Checkout this commit as modules/testframe-ide
+        uses: actions/checkout@v4
         with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-      - name: Install jsonassert-java into the local Maven repo
-        working-directory: .deps/jsonassert/modules/jsonassert-java
-        run: ./mvnw -B -q install -DskipTests
-      - name: Test
-        working-directory: server
-        run: ./mvnw -B -q verify
-
-  client:
-    name: client (React/TS)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+          path: modules/testframe-ide
       - uses: oven-sh/setup-bun@v2
       - name: Install
-        working-directory: client
-        run: bun install --frozen-lockfile
+        run: |
+          (cd modules/jsonassert/modules/jsonassert-js && bun install --frozen-lockfile)
+          (cd modules/testframe-tour-ui && bun install --frozen-lockfile)
+          (cd modules/testframe-ide && bun install --frozen-lockfile)
+      - name: Test
+        working-directory: modules/testframe-ide
+        run: bun test
       - name: Typecheck
-        working-directory: client
+        working-directory: modules/testframe-ide
         run: bun run typecheck
       - name: Build
-        working-directory: client
+        working-directory: modules/testframe-ide
         run: bun run build
-
-  scripts:
-    name: module scripts (typecheck)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bunx tsc --noEmit -p .
 
   product-api:
     name: example product-api (Spring Boot + Mongo)
@@ -72,7 +68,7 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: '25'
           cache: maven
       - name: Test
         working-directory: examples/product-test/examples-components/product-api
