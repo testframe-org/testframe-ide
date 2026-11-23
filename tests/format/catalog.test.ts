@@ -18,7 +18,7 @@ import {
 import { catalog } from '@/lib/api/domain';
 
 // Port of the catalog assertions of CardCodecTest.java (the type/subtype table of
-// docs/project-format.md, "Source types and subtypes").
+// agents/specs/project-format.md, "Source types and subtypes").
 
 describe('catalog', () => {
   test('card type and fence language follow (type, subtype)', () => {

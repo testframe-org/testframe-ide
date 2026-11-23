@@ -72,7 +72,7 @@ file. All of it is JSON under `/api/v2/*` (frames, sources, catalog, validate, r
 | `lib/` | The format, the store, the services — the server side of the API |
 | `scripts/` | Parameter-driven runners (`dev`) |
 | `examples/` | Example projects, each a self-contained suite |
-| `docs/project-format.md` | The project format (canonical spec) |
+| `agents/specs/project-format.md` | The project format (canonical spec) |
 | `tests/` | `bun test` suites for the format, the store and the services |
 
 ## Commands
@@ -87,9 +87,9 @@ bun run build       # next build
 ## Reading on
 
 - [`AGENTS.md`](AGENTS.md) — the rules: who owns what, the API table, conventions, security.
-- [`docs/project-format.md`](docs/project-format.md) — the canonical format spec.
-- [`../../docs/architecture-split-plan.md`](../../docs/architecture-split-plan.md) — how the IDE,
+- [`agents/specs/project-format.md`](../../agents/specs/project-format.md) — the canonical format spec.
+- [`../../agents/specs/architecture-split-plan.md`](../../agents/specs/architecture-split-plan.md) — how the IDE,
   the execution plugin and the tour UI split the work.
-- [`../../docs/runner-protocol.md`](../../docs/runner-protocol.md) — what a run request and its
+- [`../../agents/specs/runner-protocol.md`](../../agents/specs/runner-protocol.md) — what a run request and its
   results look like.
 - [`examples/product-test/README.md`](examples/product-test/README.md) — the example suite.

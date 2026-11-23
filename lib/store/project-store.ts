@@ -19,7 +19,7 @@ export const FRAMES_DIR = 'testframe/frames';
 export const BUILD_DIR = '.testframebuild';
 
 /**
- * Largest project file (docs/project-format.md, "File size"). A bigger one is reported and
+ * Largest project file (agents/specs/project-format.md, "File size"). A bigger one is reported and
  * skipped, never read — the same limit and the same message as the plugin's read-only
  * `ProjectDir.MAX_FILE_BYTES`, so both sides of the format agree on which files exist — and the
  * store never writes one: a save holding a bigger file is a 400 before anything is written (a
@@ -33,7 +33,7 @@ const GITIGNORE_HEADER = '# Written by the TestFrame IDE: private data and the I
 
 const SAFE_PATH = /^[A-Za-z0-9 ._/\-À-ǿ]+$/;
 const BUILD_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-/** An environment name segment: kebab-case, and `private` is reserved (docs/project-format.md). */
+/** An environment name segment: kebab-case, and `private` is reserved (agents/specs/project-format.md). */
 const ENV_SEGMENT = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 /**
@@ -353,7 +353,7 @@ export const isSourcesFileName = (name: string): boolean => SOURCES_FILE_NAME.te
 
 /**
  * Whether `name` is one of the four layer files the store may WRITE at the `testframe/` root
- * (docs/project-format.md, "Sources"): `sources.yaml`, `sources.private.yaml`,
+ * (agents/specs/project-format.md, "Sources"): `sources.yaml`, `sources.private.yaml`,
  * `sources.{env}.yaml`, `sources.{env}.private.yaml`, with `{env}` a kebab-case environment name
  * (`private` is reserved, so the two never overlap). Deny by default: any other shape is refused,
  * which keeps a write inside the `testframe/` root and keeps a secret-bearing `.private.yaml`

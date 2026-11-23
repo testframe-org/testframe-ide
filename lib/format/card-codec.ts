@@ -7,7 +7,7 @@ import type { Card } from './types';
 
 // One card file (frames/{frame}/step-{n}/{var-file}.md) and its private sibling
 // {var-file}.private.md. The frontmatter stores only what the path cannot express
-// (docs/project-format.md, "Cards").
+// (agents/specs/project-format.md, "Cards").
 
 export const CARD_SUFFIX = '.md';
 export const PRIVATE_SUFFIX = '.private.md';

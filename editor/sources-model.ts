@@ -3,7 +3,7 @@ import { isPrivateMarker } from '@/lib/sources/private-marker';
 
 // Pure helpers over the layered sources model the editor edits (GET/POST /api/v2/sources).
 // The model, its validation, the canonical write and the authoritative resolution for a run are
-// owned by lib/sources/sources-yaml.ts (spec: docs/project-format.md, "Sources"); this file only
+// owned by lib/sources/sources-yaml.ts (spec: agents/specs/project-format.md, "Sources"); this file only
 // reads and rebuilds the model immutably for the Sources tab, and derives one display-only value.
 // Nothing here touches the disk: the IDE rewrites the layers on save.
 //

@@ -34,7 +34,7 @@ import {
 // decides which two files an edit writes: "all environments" edits sources.yaml (shared) and
 // sources.private.yaml (credentials), a specific environment edits sources.{env}.yaml (override)
 // and sources.{env}.private.yaml (credentials). The IDE validates and rewrites the files on save;
-// this view only edits the model in memory (docs/project-format.md, "Sources").
+// this view only edits the model in memory (agents/specs/project-format.md, "Sources").
 // Private values are write-only: the IDE never sends them back (a marker stands in for each), so
 // a private field is a password input, empty, saying a value is stored; typing replaces it.
 

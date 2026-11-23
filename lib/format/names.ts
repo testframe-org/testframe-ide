@@ -1,4 +1,4 @@
-// Naming rules of a project (docs/project-format.md). Var-names are camelCase and live on disk
+// Naming rules of a project (agents/specs/project-format.md). Var-names are camelCase and live on disk
 // as their kebab-case file name (getActiveProducts <-> get-active-products.md), so a name is
 // storable only when it survives that round trip (no consecutive capitals).
 

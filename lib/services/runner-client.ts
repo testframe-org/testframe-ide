@@ -2,7 +2,7 @@ import { ApiError } from '../format/errors';
 import { reason } from '../openapi/openapi-service';
 import { redact } from '../sources/sources-yaml';
 
-// The IDE's client of the runner plugin (docs/runner-protocol.md, /api/v1). The plugin URL comes
+// The IDE's client of the runner plugin (agents/specs/runner-protocol.md, /api/v1). The plugin URL comes
 // from TESTFRAME_RUNNER_URL (and its token, when one is configured, from TESTFRAME_RUNNER_TOKEN);
 // the IDE calls it server-side only. Editing never needs the plugin: when it is down, not
 // configured or speaks another protocol, run requests answer 503 with the reason.

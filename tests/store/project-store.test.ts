@@ -424,7 +424,7 @@ describe('project store: sources*.yaml layers', () => {
       expect(isSourcesFileName(name)).toBe(true);
     }
     // Recognized (read) but not a valid layer. This is the recognition grammar, not the write
-    // grammar: docs/project-format.md ("Sources" > Validation) makes both "a sources.{x}
+    // grammar: agents/specs/project-format.md ("Sources" > Validation) makes both "a sources.{x}
     // [.private].yaml file whose {x} is not in environments" and "any other sources.*.yaml file
     // name" errors reported in `errors`, and a file that is never read can never be reported,
     // counted, or deleted on save. `other` and `local` are the same shape, and sources.local.yaml

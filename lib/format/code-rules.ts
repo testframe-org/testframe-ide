@@ -2,7 +2,7 @@ import * as JsonassertCode from './jsonassert-code';
 import * as MongoCall from './mongo-call';
 import * as MongoJson from './mongo-json';
 
-// Code rules per (source type, subtype) (docs/project-format.md, "Code rules"). The editor asks
+// Code rules per (source type, subtype) (agents/specs/project-format.md, "Code rules"). The editor asks
 // the IDE (POST /api/v2/validate), the frame save enforces them, and the runner checks them again
 // before a card runs. Empty code is a draft and always acceptable; kinds without a rule accept
 // anything.

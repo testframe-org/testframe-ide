@@ -6,7 +6,7 @@ All code, comments and docs in English; UI copy goes through i18n (en / pt-BR).
 
 ## Golden rules
 
-- **This module owns the project format** (`lib/format`, spec `docs/project-format.md`). The
+- **This module owns the project format** (`lib/format`, spec `agents/specs/project-format.md`). The
   execution plugin (`modules/testframe-plugin-spring`) holds read-only Java decoders of the same
   format; `bun run format:check` at the repo root is the parity gate. A format change lands here
   first, then in the plugin's decoders, then in the example projects — in the same pass.
@@ -34,7 +34,7 @@ All code, comments and docs in English; UI copy goes through i18n (en / pt-BR).
 | `tests/` | `bun test` suites: `tests/format/*`, `tests/store/*`, `tests/sources/*`, `tests/services/*`, `tests/api/*`, `tests/scripts/*`, `tests/helpers/*` |
 | `scripts/` | Parameter-driven runners — every setting arrives as `--key=value`, this module never reads the root config |
 | `examples/<project>/testframe/` | Example projects in the current format |
-| `docs/project-format.md` | The format spec (canonical) |
+| `agents/specs/project-format.md` | The format spec (canonical) |
 
 `tsconfig.json` includes `app`, `lib`, `editor`, `tests`, `scripts` and excludes `examples`.
 `next.config.ts` sets the bundler root to the monorepo root so

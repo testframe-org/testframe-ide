@@ -1,7 +1,7 @@
 import { EJSON } from 'bson';
 import { strictJsonProblem } from './strict-json';
 
-// A mongo card's call (docs/project-format.md, "Mongo cards"): the collection (the card's
+// A mongo card's call (agents/specs/project-format.md, "Mongo cards"): the collection (the card's
 // `collection:` frontmatter), the function named by the subtype, and the card body: one JSON
 // array whose items are the function's positional arguments, like the shell call
 // db.products.find(<arg1>, <arg2>, <arg3>). Trailing optional arguments may be omitted.

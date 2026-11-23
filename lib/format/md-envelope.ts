@@ -1,4 +1,4 @@
-// The envelope shared by every project .md file (docs/project-format.md):
+// The envelope shared by every project .md file (agents/specs/project-format.md):
 //
 //   -------------------
 //   key: value

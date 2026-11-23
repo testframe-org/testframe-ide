@@ -11,7 +11,7 @@ import { ApiError, requestJson } from './http';
 // The editor's only network surface: every call goes to this module's own route handlers
 // (app/api/v2/*), which exchange JSON. The response types are imported from lib/ so the editor
 // keeps no second copy of a shape; the run answers come from the execution plugin and follow
-// docs/runner-protocol.md, which the IDE routes pass through unchanged.
+// agents/specs/runner-protocol.md, which the IDE routes pass through unchanged.
 
 const enc = encodeURIComponent;
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) });
@@ -23,7 +23,7 @@ export interface HealthResponse {
   runner: RunnerHealth;
 }
 
-/** One card's outcome in a run (docs/runner-protocol.md, "CardResult"). */
+/** One card's outcome in a run (agents/specs/runner-protocol.md, "CardResult"). */
 export interface CardResult {
   varName: string;
   status: 'success' | 'error' | 'skipped';

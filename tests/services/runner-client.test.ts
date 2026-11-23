@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ApiError } from '@/lib/format/errors';
 import { PROTOCOL, RunnerClient, shownUrl } from '@/lib/services/runner-client';
 
-// The IDE's client of the runner plugin (docs/runner-protocol.md): runs answer 503 unless the
+// The IDE's client of the runner plugin (agents/specs/runner-protocol.md): runs answer 503 unless the
 // plugin is configured, up and speaks the IDE's protocol; the token is added server-side only and
 // the health answer (which reaches the browser) never carries user-info or the token.
 

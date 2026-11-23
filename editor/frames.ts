@@ -5,7 +5,7 @@ import type { CardRunView, EditorCard, EditorFrame, EditorStep } from './types';
 
 // The editor's in-memory model against the editing API (GET/POST /api/v2/frames). The project
 // format itself — file names, frontmatter, the fenced body, what is stored and what is derived —
-// is owned by lib/format (spec: docs/project-format.md) and enforced by the IDE on save; the
+// is owned by lib/format (spec: agents/specs/project-format.md) and enforced by the IDE on save; the
 // naming rules are imported from lib/format/names rather than mirrored here.
 
 /** Frame shown when a project has none yet. */

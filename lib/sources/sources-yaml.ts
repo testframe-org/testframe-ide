@@ -7,7 +7,7 @@ export { PRIVATE_MARKER } from './private-marker';
 
 // The project's sources: testframe/sources.yaml (environments + every source declaration) and
 // the layers sources.private.yaml, sources.{env}.yaml, sources.{env}.private.yaml
-// (docs/project-format.md, "Sources: sources.yaml and its layers"). This module parses,
+// (agents/specs/project-format.md, "Sources: sources.yaml and its layers"). This module parses,
 // validates, writes (canonical form) and resolves them; the store does the file I/O.
 
 /** header name -> value; null removes the header inherited from an earlier layer. */
@@ -377,7 +377,7 @@ export function declaredRefs(model: SourcesModel): string[] {
 
 // ------------------------------------------------------------------ resolution
 
-/** One source resolved for an environment (docs/project-format.md, "Resolution"). */
+/** One source resolved for an environment (agents/specs/project-format.md, "Resolution"). */
 export interface ResolvedSource {
   ref: string;
   type: string;
@@ -474,7 +474,7 @@ function decode(text: string): string {
 }
 
 /**
- * The secrets of one private value (docs/runner-protocol.md, "Secrets"; same derivation as the
+ * The secrets of one private value (agents/specs/runner-protocol.md, "Secrets"; same derivation as the
  * plugin's `SourcesDecoder.secretsOf`): the whole value; for a URI with user-info also the
  * password and `user:password`, plus their URL-decoded forms when they differ; for a header value
  * of the form `{scheme} {token}` also the trimmed token.

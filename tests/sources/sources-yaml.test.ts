@@ -12,7 +12,7 @@ import {
   type SourcesModel
 } from '@/lib/sources/sources-yaml';
 
-// The layered sources (docs/project-format.md, "Sources"): merge order, null removal, header
+// The layered sources (agents/specs/project-format.md, "Sources"): merge order, null removal, header
 // names across layers, {env} substitution, the secrets of private values (same derivation as the
 // plugin's SourcesDecoder.secretsOf), the canonical round trip, and the masking that keeps every
 // private value out of the browser.

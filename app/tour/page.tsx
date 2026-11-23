@@ -8,7 +8,7 @@ import { TourApp, type Lang } from '@testframe/tour-ui';
 const LANG_KEY = 'testframe.lang';
 
 /**
- * The test tour, hosted by the IDE (docs/test-tour.md). The editor saves the project before
+ * The test tour, hosted by the IDE (agents/specs/test-tour.md). The editor saves the project before
  * opening this page; from here every tour API call goes through the IDE's own `/api/tour/*` proxy
  * to the plugin, so the browser talks to one origin only and never receives a secret. The screens,
  * the tour state and the PDF are the same `@testframe/tour-ui` the plugin serves at `/tour`.

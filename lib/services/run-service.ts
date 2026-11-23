@@ -8,7 +8,7 @@ import type { RunnerClient } from './runner-client';
 import type { SourceService } from './source-service';
 
 // Runs from the editor (POST /api/v2/run, /run/card, /run/mongo): the IDE builds the
-// self-contained request of docs/runner-protocol.md (cards as the editor has them, the sources
+// self-contained request of agents/specs/runner-protocol.md (cards as the editor has them, the sources
 // they use resolved in the run's environment with the openapi operations from the environment's
 // cache, and the secrets) and forwards it to the runner plugin; the plugin's answer (JSON, or the
 // NDJSON stream with `Accept: application/x-ndjson`) goes back as is.

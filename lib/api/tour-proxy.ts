@@ -1,7 +1,7 @@
 import { ApiError } from '../format/errors';
 import { hasBody, isJsonContentType } from './http';
 
-// The IDE's /api/tour/* proxy (docs/test-tour.md): the request is forwarded to the plugin's
+// The IDE's /api/tour/* proxy (agents/specs/test-tour.md): the request is forwarded to the plugin's
 // /api/v1/tour/*, with the plugin token added server-side. The target path is built from
 // request-supplied segments, so it is validated here before anything is forwarded: a segment
 // that is empty, `.` or `..` (in any encoding) would let the request climb out of /api/v1/tour
@@ -11,7 +11,7 @@ export const TOUR_PREFIX = '/api/v1/tour';
 
 /**
  * The tour API's path segments are project, frame and run-id names, plus fixed words
- * (docs/test-tour.md, "Tour API"): `[A-Za-z0-9._-]+`. Anything else is refused.
+ * (agents/specs/test-tour.md, "Tour API"): `[A-Za-z0-9._-]+`. Anything else is refused.
  */
 const SEGMENT = /^[A-Za-z0-9._-]+$/;
 const MAX_SEGMENTS = 8;

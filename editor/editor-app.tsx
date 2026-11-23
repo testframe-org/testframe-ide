@@ -313,7 +313,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
   }, [projectName, sourcesModel, environment, pushMsg, t]);
 
   /**
-   * Opens the test tour (docs/test-tour.md). The tour reads the project from disk through the
+   * Opens the test tour (agents/specs/test-tour.md). The tour reads the project from disk through the
    * plugin, so the frames and the sources layers are saved first; a rejected save keeps the editor
    * where it is and reports why. The screens themselves are `@testframe/tour-ui` on the /tour page,
    * talking to the plugin through this module's /api/tour/* proxy.

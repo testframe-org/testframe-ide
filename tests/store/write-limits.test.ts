@@ -5,7 +5,7 @@ import { ApiError } from '@/lib/format/errors';
 import { FRAMES_DIR, MAX_FILE_BYTES, ProjectStore } from '@/lib/store/project-store';
 import { tmpProject } from '../helpers/tmp-project';
 
-// docs/project-format.md, "File size": the store never writes a file it would not read back
+// agents/specs/project-format.md, "File size": the store never writes a file it would not read back
 // (over MAX_FILE_BYTES). Such a save is a 400 before anything is written — otherwise the file
 // would be skipped on the next load and pruned by the next save (silent loss).
 

@@ -1,5 +1,5 @@
 // Source types, their card subtypes and the card defaults derived from them
-// (docs/project-format.md, "Source types and subtypes"). A source has a TYPE; a card bound to it
+// (agents/specs/project-format.md, "Source types and subtypes"). A source has a TYPE; a card bound to it
 // picks a SUBTYPE of that type when the type has subtypes. The card type, fence language, form
 // and the defaults all follow (type, subtype) and are never stored.
 

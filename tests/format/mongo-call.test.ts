@@ -80,7 +80,7 @@ describe('mongo call arguments', () => {
     expect(problem('find', '[{}, null, {"limit": 5}]')).toBeNull();
     expect(problem('find', '[{"ativo": true}, null, null]')).toBeNull();
     // the code rule is lenient: a required argument may be a binding, so null passes here and
-    // the runner checks the resolved arguments again (docs/project-format.md, "Mongo cards")
+    // the runner checks the resolved arguments again (agents/specs/project-format.md, "Mongo cards")
     expect(problem('updateOne', '[{"a": 1}, null]')).toBeNull();
     expect(problem('insertOne', '[null]')).toBeNull();
     // an options object with a null value is accepted for the same reason

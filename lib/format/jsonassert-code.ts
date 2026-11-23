@@ -1,6 +1,6 @@
 import { parseAssert } from '@jsonassert/jsonassert-js';
 
-// The body of a jsonassert card, by subtype (docs/project-format.md, "jsonassert cards"):
+// The body of a jsonassert card, by subtype (agents/specs/project-format.md, "jsonassert cards"):
 //   script:      one statement per line: `assert <expr> <op> <expr>` lines and/or plain
 //                expressions (the value of the last plain expression is the card's variable);
 //   conditional: exactly one boolean expression (no `assert`).

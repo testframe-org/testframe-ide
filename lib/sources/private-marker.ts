@@ -1,4 +1,4 @@
-// The stand-in for a secret in the sources model the browser sees (docs/project-format.md,
+// The stand-in for a secret in the sources model the browser sees (agents/specs/project-format.md,
 // "API"). A module of its own so the editor can import it without the YAML parser.
 
 /**

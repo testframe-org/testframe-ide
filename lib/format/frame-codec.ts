@@ -6,7 +6,7 @@ import * as Names from './names';
 import type { Card, CardRun, Frame, FramesResponse, ProjectFile, Step } from './types';
 
 // A frame directory: {frame}/step-{n}/{var-file}.md cards, the per-step flow.md that maps the
-// card sequence, and the private notes {var-file}.private.md (docs/project-format.md).
+// card sequence, and the private notes {var-file}.private.md (agents/specs/project-format.md).
 // Paths are relative to testframe/frames/. Last runs are not project files: they come from the
 // IDE build cache, keyed by card base ({frame}/step-{n}/{var-file}).
 
