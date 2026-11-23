@@ -7,7 +7,8 @@ name: CI
 # superproject's CI.
 #
 # Requires the repository secret SUPERPROJECT_TOKEN: a fine-grained PAT with read-only "Contents"
-# access to testframe-org/testframe. The jsonassert submodule is public.
+# access to testframe-org/testframe and its private submodule testframe-org/testframe-tour-ui. The
+# jsonassert submodule is public.
 
 on:
   push:
@@ -29,10 +30,14 @@ jobs:
           repository: testframe-org/testframe
           token: ${{ secrets.SUPERPROJECT_TOKEN }}
           persist-credentials: false
-      - name: Checkout the jsonassert submodule
+      - name: Checkout the sibling submodules (jsonassert, tour UI)
+        env:
+          SUPERPROJECT_TOKEN: ${{ secrets.SUPERPROJECT_TOKEN }}
         run: |
+          # Private testframe-org submodules use the PAT; public ones (jsonassert) go anonymous.
+          git config --global url."https://x-access-token:${SUPERPROJECT_TOKEN}@github.com/testframe-org/".insteadOf "git@github.com:testframe-org/"
           git config --global url."https://github.com/".insteadOf "git@github.com:"
-          git submodule update --init --depth 1 modules/jsonassert
+          git submodule update --init --recursive --depth 1 modules/jsonassert modules/testframe-tour-ui
       - name: Checkout this commit as modules/testframe-ide
         uses: actions/checkout@v4
         with:
