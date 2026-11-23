@@ -26,7 +26,7 @@ All code, comments and docs in English; UI copy goes through i18n (en / pt-BR).
 | `app/` | App Router: the editor page(s) plus the `/api/v2/*` and `/api/tour/*` route handlers |
 | `lib/format/` | **The format**: `md-envelope`, `names`, `card-codec`, `frame-codec`, `catalog`, `code-rules`, `jsonassert-code`, `mongo-call`, `mongo-json`, `strict-json`, `types`, `errors` |
 | `lib/store/project-store.ts` | All disk access: atomic writes, **path sanitization**, `replace(...)` pruning, the `sources*.yaml` layers, `.testframebuild/`, `testframe/.gitignore` |
-| `lib/sources/sources-yaml.ts` | The layered sources: read, merge, validate, canonical write |
+| `lib/sources/` | `sources-yaml` (the layered sources: read, merge, validate, canonical write), plus `private-marker` and `source-rename`, the two pieces the editor imports without the YAML parser |
 | `lib/services/` | `context` (process-wide services), `frame-service`, `source-service`, `sources-save`, `openapi` consumers, `runner-client`, `run-service` |
 | `lib/openapi/` | `openapi-spec` (a spec distilled to its API base + operations) and `openapi-service` (the `.testframebuild/` operations cache, per environment) |
 | `lib/api/` | `http` (`handle(request, fn)` with the request guard, `readJson`), `tour-proxy` (the validated `/api/tour/*` target), `domain` |
@@ -52,7 +52,7 @@ that is what makes the live assertion preview work without a build step.
 | `GET /api/v2/frames/[project]` | A project's frames (with load `errors`) |
 | `POST /api/v2/frames` | Validate and replace a frame's files |
 | `GET /api/v2/sources/[project]` | The project's layers, every `.private.yaml` value replaced by the marker `"<private>"` (`SourceService.view`) |
-| `POST /api/v2/sources` | Validate and rewrite the `sources*.yaml` layers; a `"<private>"` field keeps the value on disk |
+| `POST /api/v2/sources` | Validate and rewrite the `sources*.yaml` layers; a `"<private>"` field keeps the value on disk, and `renames` carries the stored private values of a renamed source |
 | `GET /api/v2/sources/openapi/[name]/operations` (+ `/refresh`) | The source's cached operations for an environment (`{baseUrl, fetchedAt, operations}`, never the spec URL) |
 | `GET /api/v2/catalog` | Source types, subtypes, card forms, languages, defaults, HTTP methods |
 | `POST /api/v2/validate` | The code rule of a (type, subtype) |
@@ -83,8 +83,9 @@ Port and the two URLs are resolved by the repo-root `scripts/` from `package.jso
 - Secrets live only in `sources*.private.yaml` layers (gitignored) and are sent to the plugin as
   `secrets` so it can redact them. They never come back and never reach the browser: routes
   return `SourceService.view` (private values masked as `PRIVATE_MARKER`, `"<private>"`), never
-  `load`; a save resolves each marker against the value on disk (`unmaskModel`); the editor shows
-  private fields write-only. The openapi cache is keyed by the spec URL's SHA-256 and the spec URL
+  `load`; a save resolves each marker against the value on disk (`unmaskModel`, applied to the
+  stored model renamed by the save's `renames` so a renamed source keeps its values); the editor
+  shows private fields write-only. The openapi cache is keyed by the spec URL's SHA-256 and the spec URL
   is never returned; error messages and warnings go through `redact` with the source's secrets;
   the runner health strips user-info from the plugin URL.
 - Generated files go to `testframe/.testframebuild/` (internal layout, safe to delete, gitignored):
@@ -106,8 +107,9 @@ accepts only `application/json` (415). The tour proxy builds its target with
 Files over 2 MiB are never written (400 before any write of the save).
 
 `lib/store/project-store.ts` is the security boundary: character whitelist, `..` rejected, the
-resolved path must stay under its base, `.md` only where the format says so, no symlink following,
-and `replace(...)` prunes stale files inside a scope that can never be the `frames/` root. Keep
+resolved path must stay under its base, `.md` only where the format says so, no symlink following
+(checked when a path is resolved and again immediately before each write), and `replace(...)`
+prunes stale files inside a scope that can never be the `frames/` root. Keep
 those rules in every new route that accepts a name or a path, and add a test that would fail if the
 guard were removed. Use the `guardian` thread for changes here.
 

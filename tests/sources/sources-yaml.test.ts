@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { renameSource, renamedStored } from '@/lib/sources/source-rename';
 import {
   PRIVATE_MARKER,
   maskModel,
   readModel,
+  readRenames,
   redact,
   renderModel,
   resolve,
@@ -223,5 +225,115 @@ describe('sources: redaction', () => {
 
   test('values under 4 characters are not substring-matched', () => {
     expect(redact('abc in abcdef', ['abc'])).toBe('abc in abcdef');
+  });
+});
+
+describe('sources: a model sent by the editor', () => {
+  test('a section that is not a map is reported, not read as empty (that would rewrite the files)', () => {
+    // read as {} these would save a sources.yaml without a single source and delete every layer
+    expect(validateModel({ environments: ['local'], layers: 5 }).errors).toEqual([
+      'sources: layers: expected a map (base, private, env)'
+    ]);
+    expect(validateModel({ environments: ['local'] }).errors).toEqual([
+      'sources: layers: expected a map (base, private, env)'
+    ]);
+    expect(validateModel({ environments: ['local'], layers: { base: {}, env: 'local' } }).errors).toEqual([
+      'sources: layers.env: expected a map of environment names'
+    ]);
+    for (const local of [5, [], 'public']) {
+      expect(validateModel({ environments: ['local'], layers: { base: {}, env: { local } } }).errors).toEqual([
+        'sources: layers.env.local: expected a map (public, private)'
+      ]);
+    }
+  });
+
+  test('an absent or null env section is an empty one, and a well-formed model has no problem', () => {
+    expect(validateModel({ environments: ['local'], layers: { base: {} } }).errors).toEqual([]);
+    expect(validateModel({ environments: ['local'], layers: { base: {}, env: null } }).errors).toEqual([]);
+    expect(validateModel({ environments: ['local'], layers: { base: {}, env: { local: null } } }).errors).toEqual([]);
+    const { model: m, errors } = validateModel({
+      environments: ['local'],
+      layers: { base: { mongo: { db: {} } }, private: {}, env: { local: { public: { mongo: { db: { 'base-url': 'x' } } }, private: {} } } }
+    });
+    expect(errors).toEqual([]);
+    expect(m.layers.env.local!.public).toEqual({ mongo: { db: { 'base-url': 'x' } } });
+  });
+});
+
+describe('sources: renaming a source carries its stored private values', () => {
+  const disk = () =>
+    model({
+      'sources.yaml': 'environments: [hml]\nopenapi:\n  api:\n    base-url: http://api\n    headers:\n      X-Public: pub\n',
+      'sources.private.yaml': 'openapi:\n  api:\n    headers:\n      Authorization: Bearer base-token\n',
+      'sources.hml.private.yaml': 'openapi:\n  api:\n    base-url: http://u:hml-pass@api-hml\n'
+    });
+
+  test('renameSource renames in every layer that mentions the source', () => {
+    const stored = disk();
+    const renamed = renameSource(stored, 'openapi', 'api', 'api-v2');
+    expect(Object.keys(renamed.layers.base.openapi!)).toEqual(['api-v2']);
+    expect(Object.keys(renamed.layers.private.openapi!)).toEqual(['api-v2']);
+    expect(Object.keys(renamed.layers.env.hml!.private.openapi!)).toEqual(['api-v2']);
+    expect(renamed.layers.private.openapi!['api-v2']).toEqual(stored.layers.private.openapi!.api);
+    // the model it came from is untouched, and a no-op rename returns it as is
+    expect(Object.keys(stored.layers.base.openapi!)).toEqual(['api']);
+    expect(renameSource(renamed, 'openapi', 'api-v2', 'api-v2')).toBe(renamed);
+    expect(renameSource(renamed, 'openapi', 'api', 'x')).toEqual(renamed);
+  });
+
+  test('a renamed source keeps its stored private values, so they are never retyped', () => {
+    const stored = disk();
+    const { model: sent, errors: sentErrors } = validateModel(renameSource(maskModel(stored), 'openapi', 'api', 'api-v2'));
+    expect(sentErrors).toEqual([]);
+    const { model: back, errors } = unmaskModel(sent, renamedStored(stored, sent, [{ type: 'openapi', from: 'api', to: 'api-v2' }]));
+    expect(errors).toEqual([]);
+    const files = Object.fromEntries(renderModel(back));
+    expect(files['sources.yaml']).toContain('api-v2:');
+    expect(files['sources.private.yaml']).toBe('openapi:\n  api-v2:\n    headers:\n      Authorization: Bearer base-token\n');
+    expect(files['sources.hml.private.yaml']).toBe('openapi:\n  api-v2:\n    base-url: http://u:hml-pass@api-hml\n');
+  });
+
+  test('without the rename the marker is unresolved (the limitation this closes)', () => {
+    const stored = disk();
+    const { model: sent } = validateModel(renameSource(maskModel(stored), 'openapi', 'api', 'api-v2'));
+    const { errors } = unmaskModel(sent, renamedStored(stored, sent, []));
+    expect(errors).toEqual([
+      'sources.private.yaml: openapi.api-v2.headers.Authorization: no stored private value to keep (type the value again)',
+      'sources.hml.private.yaml: openapi.api-v2.base-url: no stored private value to keep (type the value again)'
+    ]);
+  });
+
+  test('a rename the sent model contradicts carries nothing: a secret is never copied to another source', () => {
+    const stored = disk();
+    // the sent model still declares the old name, so this is a copy onto a new source, not a rename
+    const sent = maskModel(stored);
+    sent.layers.base.openapi!['api-v2'] = {};
+    sent.layers.private.openapi!['api-v2'] = { headers: { Authorization: PRIVATE_MARKER } };
+    const { errors } = unmaskModel(sent, renamedStored(stored, sent, [{ type: 'openapi', from: 'api', to: 'api-v2' }]));
+    expect(errors).toEqual([
+      'sources.private.yaml: openapi.api-v2.headers.Authorization: no stored private value to keep (type the value again)'
+    ]);
+  });
+
+  test('a rename onto a source that already exists on disk is refused (no merge)', () => {
+    const stored = model({
+      'sources.yaml': 'environments: [hml]\nopenapi:\n  api:\n    base-url: http://api\n  other:\n    base-url: http://other\n',
+      'sources.private.yaml': 'openapi:\n  api:\n    headers:\n      Authorization: Bearer api-token\n'
+    });
+    const sent = maskModel(stored);
+    delete sent.layers.base.openapi!['api'];
+    sent.layers.private.openapi!['other'] = { headers: { Authorization: PRIVATE_MARKER } };
+    const { errors } = unmaskModel(sent, renamedStored(stored, sent, [{ type: 'openapi', from: 'api', to: 'other' }]));
+    expect(errors).toEqual([
+      'sources.private.yaml: openapi.other.headers.Authorization: no stored private value to keep (type the value again)'
+    ]);
+  });
+
+  test('readRenames keeps only the well-formed entries of a save body', () => {
+    expect(readRenames({ renames: [{ type: 'openapi', from: 'a', to: 'b' }] })).toEqual([{ type: 'openapi', from: 'a', to: 'b' }]);
+    expect(readRenames({ renames: [{ type: 'openapi', from: 'a' }, 'a->b', null, { type: 1, from: 'a', to: 'b' }] })).toEqual([]);
+    expect(readRenames({ renames: 'a->b' })).toEqual([]);
+    expect(readRenames({})).toEqual([]);
+    expect(readRenames(null)).toEqual([]);
   });
 });

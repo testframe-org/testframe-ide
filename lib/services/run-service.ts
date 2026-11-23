@@ -154,7 +154,7 @@ export class RunService {
       subtype: requireString(body, 'subtype'),
       collection: requireString(body, 'collection'),
       timeout: typeof body.timeoutMs === 'number' ? body.timeoutMs : null,
-      code: typeof body.body === 'string' ? body.body : ''
+      code: requireMongoBody(body.body)
     };
     return this.runCard({ project: body.project, environment: body.environment, step: 1, card, vars: {} });
   }
@@ -164,4 +164,16 @@ function requireString(body: Record<string, unknown>, key: string): string {
   const v = body[key];
   if (typeof v !== 'string' || !v.trim()) throw new ApiError(400, `${key} is required`);
   return v;
+}
+
+/**
+ * The mongo call's `body`: the JSON array of the driver function's arguments, sent as text (the
+ * card code). Anything else is a 400 — silently running an empty body would answer with the
+ * plugin's "no arguments" error for a request that named its arguments in the wrong shape.
+ */
+function requireMongoBody(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new ApiError(400, 'body is required (the JSON array of the call arguments, as a string)');
+  }
+  return value;
 }

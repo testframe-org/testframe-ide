@@ -19,6 +19,7 @@ import {
   ZoomIn,
   ZoomOut
 } from 'lucide-react';
+import type { SourceRename } from '@/lib/sources/source-rename';
 import type { SourcesModel } from '@/lib/sources/sources-yaml';
 import { ideApi, runFrameStream, type CardResult, type HealthResponse, type RunEvent } from './api/ide';
 import { problemsOf, reasonOf } from './api/http';
@@ -137,6 +138,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
 
   // --- sources (the layered model), the current environment and the tab ---
   const [sourcesModel, setSourcesModel] = useState<SourcesModel>(emptyModel);
+  const [sourceRenames, setSourceRenames] = useState<SourceRename[]>([]);
   const [sourcesErrors, setSourcesErrors] = useState<string[]>([]);
   const [sourcesProblems, setSourcesProblems] = useState<string[]>([]);
   const [sourcesWarnings, setSourcesWarnings] = useState<string[]>([]);
@@ -266,10 +268,25 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
 
   // ------------------------------------------------------------------ sources
 
+  /**
+   * Records a source rename for the next save. The IDE applies the same renames to the model on
+   * disk, so the private values stored under the old name answer the markers the editor sends
+   * under the new one instead of having to be typed again. Renaming a rename keeps the original
+   * name; renaming back to it drops the entry (the save then needs no rename at all).
+   */
+  const recordSourceRename = useCallback((type: string, from: string, to: string) => {
+    setSourceRenames((prev) => {
+      const original = prev.find((r) => r.type === type && r.to === from)?.from ?? from;
+      const rest = prev.filter((r) => !(r.type === type && (r.to === from || r.from === original)));
+      return original === to ? rest : [...rest, { type, from: original, to }];
+    });
+  }, []);
+
   const reloadSources = useCallback(async () => {
     try {
       const data = await ideApi.loadSources(slug(projectName));
       setSourcesModel(data);
+      setSourceRenames([]);
       setSourcesErrors(data.errors);
       setSourcesProblems([]);
       setSourcesWarnings([]);
@@ -288,7 +305,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
   const saveSources = useCallback(async () => {
     setSavingSources(true);
     try {
-      const data = await ideApi.saveSources(slug(projectName), sourcesModel, environment);
+      const data = await ideApi.saveSources(slug(projectName), sourcesModel, environment, sourceRenames);
       pushMsg(t('savedSources', { n: data.saved, root: data.root }), 'success');
       data.warnings.forEach((w) => pushMsg(w, 'error'));
       setSourcesProblems([]);
@@ -296,6 +313,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
       // Re-read: the IDE wrote the layers in canonical form and may have dropped environments.
       const fresh = await ideApi.loadSources(slug(projectName));
       setSourcesModel(fresh);
+      setSourceRenames([]);
       setSourcesErrors(fresh.errors);
       setEnvironment((current) => {
         const kept = current && fresh.environments.includes(current) ? current : (fresh.environments[0] ?? null);
@@ -310,7 +328,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
     } finally {
       setSavingSources(false);
     }
-  }, [projectName, sourcesModel, environment, pushMsg, t]);
+  }, [projectName, sourcesModel, sourceRenames, environment, pushMsg, t]);
 
   /**
    * Opens the test tour (agents/specs/test-tour.md). The tour reads the project from disk through the
@@ -326,7 +344,8 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
     setOpeningTour(true);
     try {
       await ideApi.saveFrame(storageName, frameToApi(frameName, steps));
-      await ideApi.saveSources(storageName, sourcesModel, environment);
+      await ideApi.saveSources(storageName, sourcesModel, environment, sourceRenames);
+      setSourceRenames([]);
       const query = new URLSearchParams({ project: storageName, env: environment });
       window.open(`/tour?${query.toString()}`, '_blank', 'noopener,noreferrer');
     } catch (err) {
@@ -335,7 +354,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
     } finally {
       setOpeningTour(false);
     }
-  }, [environment, frameName, pushMsg, sourcesModel, steps, storageName, t]);
+  }, [environment, frameName, pushMsg, sourceRenames, sourcesModel, steps, storageName, t]);
 
   /** Declared source names of a type, for the card editor's name-source select. */
   const sourcesOfType = useCallback((sourceType: string): string[] => sourceNames(sourcesModel, sourceType), [sourcesModel]);
@@ -882,7 +901,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
         <div className="flex items-center gap-2.5">
           <EnvironmentPicker environments={sourcesModel.environments} value={environment} onChange={switchEnvironment} />
 
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/80" role="group" aria-label="Language">
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200/80" role="group" aria-label={t('languageLabel')}>
             <button
               type="button"
               onClick={() => setLang('en')}
@@ -1015,6 +1034,7 @@ export function EditorApp({ project, onSwitchProject }: EditorAppProps) {
           saving={savingSources}
           currentEnvironment={environment}
           onChange={setSourcesModel}
+          onRename={recordSourceRename}
           onSave={() => void saveSources()}
           onReload={() => void reloadSources()}
         />

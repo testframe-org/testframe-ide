@@ -1,5 +1,6 @@
 import { ApiError } from '../format/errors';
 import * as Names from '../format/names';
+import { renamedStored } from '../sources/source-rename';
 import * as Sources from '../sources/sources-yaml';
 import type { ResolvedSource, SourcesModel } from '../sources/sources-yaml';
 import type { ProjectStore, SaveResult } from '../store/project-store';
@@ -33,20 +34,24 @@ export class SourceService {
 
   /**
    * Validates and rewrites the layer files: sources.yaml, sources.private.yaml and the
-   * sources.{env}[.private].yaml of every listed environment; empty layers and every layer of
-   * an environment no longer listed are deleted. Invalid data is a 400 with every problem.
-   * The input comes from `view`: a private value still holding the marker keeps the value on
-   * disk (`Sources.unmaskModel`), a marker that cannot be resolved is a 400.
+   * sources.{env}[.private].yaml of every listed environment; empty layers, every layer of an
+   * environment no longer listed and every bogus `sources.*.yaml` file are deleted. Invalid data
+   * is a 400 with every problem. The input comes from `view`: a private value still holding the
+   * marker keeps the value on disk (`Sources.unmaskModel`), a marker that cannot be resolved is a
+   * 400. `renames` carries the stored private values of a source the editor renamed.
    */
   async save(project: string, input: unknown): Promise<{ result: SaveResult; model: SourcesModel; previous: SourcesModel }> {
     const { model: sent, errors } = Sources.validateModel(input);
     if (errors.length) throw new ApiError(400, errors.join('; '), errors);
     const { layers: existing } = await this.store.readSourceLayers(project);
     const previous = Sources.readModel(existing).model;
-    const { model, errors: markerErrors } = Sources.unmaskModel(sent, previous);
+    const { model, errors: markerErrors } = Sources.unmaskModel(sent, renamedStored(previous, sent, Sources.readRenames(input)));
     if (markerErrors.length) throw new ApiError(400, markerErrors.join('; '), markerErrors);
     const files = Sources.renderModel(model);
-    const remove = [...existing.keys()].filter((name) => !files.has(name) && Sources.classify(name) !== null);
+    // The store only ever reads names its recognition grammar accepts, so everything it read and
+    // the model does not hold is dropped: an unlisted environment's layers, and a bogus file name
+    // (sources.a.b.yaml) that can never be part of a model and would otherwise stay forever.
+    const remove = [...existing.keys()].filter((name) => !files.has(name));
     const result = await this.store.writeSourceLayers(project, files, remove);
     return { result, model, previous };
   }

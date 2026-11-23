@@ -4,6 +4,7 @@ import type { OpenApiSpec } from '@/lib/openapi/openapi-spec';
 import type { RunnerHealth } from '@/lib/services/runner-client';
 import type { SourcesResponse } from '@/lib/services/source-service';
 import type { SourcesSaveResponse } from '@/lib/services/sources-save';
+import type { SourceRename } from '@/lib/sources/source-rename';
 import type { SourcesModel } from '@/lib/sources/sources-yaml';
 import type { ProjectSummary, SaveResult } from '@/lib/store/project-store';
 import { ApiError, requestJson } from './http';
@@ -88,12 +89,17 @@ export const ideApi = {
   /** The sources*.yaml layers of a project (base, private and per environment). */
   loadSources: (project: string) => requestJson<SourcesResponse>(`/api/v2/sources/${enc(project)}`),
 
-  /** Rewrites the layers; `env` is the environment whose openapi operations get refreshed. */
-  saveSources: (project: string, model: SourcesModel, env: string | null) =>
+  /**
+   * Rewrites the layers; `env` is the environment whose openapi operations get refreshed and
+   * `renames` are the sources renamed since the model was read, so their stored private values
+   * follow the new name instead of having to be typed again.
+   */
+  saveSources: (project: string, model: SourcesModel, env: string | null, renames: SourceRename[] = []) =>
     requestJson<SourcesSaveResponse>('/api/v2/sources', post({
       project,
       environments: model.environments,
       layers: model.layers,
+      ...(renames.length ? { renames } : {}),
       ...(env ? { env } : {})
     })),
 

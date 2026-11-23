@@ -55,18 +55,52 @@ export function camelNameProblem(what: string, name: string | null | undefined):
   return null;
 }
 
+/**
+ * Why a source name is not storable, as a stable code. The rule lives here once; the message of
+ * {@link sourceNameProblem} (part of the format, matched by the plugin's decoders) and the editor's
+ * localized copy (editor/i18n.tsx) are both derived from it, so the UI never parses a message.
+ */
+export type SourceNameProblem = 'too-short' | 'invalid-characters';
+
+/** Problem code of a source name (a key under its type in sources.yaml), or null. */
+export function sourceNameProblemCode(name: string | null | undefined): SourceNameProblem | null {
+  if (!name || name.length < 2) return 'too-short';
+  if (!SOURCE_NAME.test(name)) return 'invalid-characters';
+  return null;
+}
+
 /** Problem with a source name (a key under its type in sources.yaml), or null. */
 export function sourceNameProblem(name: string | null | undefined): string | null {
-  if (!name || name.length < 2) return 'name too short';
-  if (!SOURCE_NAME.test(name)) return 'use lowercase letters, digits, hyphen and underscore (starting with a letter or digit)';
+  switch (sourceNameProblemCode(name)) {
+    case 'too-short':
+      return 'name too short';
+    case 'invalid-characters':
+      return 'use lowercase letters, digits, hyphen and underscore (starting with a letter or digit)';
+    default:
+      return null;
+  }
+}
+
+/** Why an environment name is not usable, as a stable code (see {@link SourceNameProblem}). */
+export type EnvironmentNameProblem = 'invalid' | 'reserved';
+
+/** Problem code of an environment name, or null. */
+export function environmentNameProblemCode(name: unknown): EnvironmentNameProblem | null {
+  if (typeof name !== 'string' || !ENV_NAME.test(name)) return 'invalid';
+  if (name === 'private') return 'reserved';
   return null;
 }
 
 /** Problem with an environment name, or null. */
 export function environmentNameProblem(name: unknown): string | null {
-  if (typeof name !== 'string' || !ENV_NAME.test(name)) return `invalid environment name ${JSON.stringify(name)} (kebab-case: [a-z0-9]+(-[a-z0-9]+)*)`;
-  if (name === 'private') return 'the environment name "private" is reserved';
-  return null;
+  switch (environmentNameProblemCode(name)) {
+    case 'invalid':
+      return `invalid environment name ${JSON.stringify(name)} (kebab-case: [a-z0-9]+(-[a-z0-9]+)*)`;
+    case 'reserved':
+      return 'the environment name "private" is reserved';
+    default:
+      return null;
+  }
 }
 
 export const isFrameDirName = (name: string): boolean => FRAME_NAME.test(name);

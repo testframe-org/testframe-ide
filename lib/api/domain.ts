@@ -1,5 +1,6 @@
 import * as Catalog from '../format/catalog';
 import * as CodeRules from '../format/code-rules';
+import { ApiError } from '../format/errors';
 import * as MongoCall from '../format/mongo-call';
 
 // Domain definitions served to the editor, which keeps no local copies: the catalog of source
@@ -66,7 +67,21 @@ export interface ValidateResponse {
 }
 
 export function validate(body: unknown): ValidateResponse {
-  const b = (body ?? {}) as { sourceType?: string | null; subtype?: string | null; code?: string | null };
-  const problems = CodeRules.problems(b.sourceType, b.subtype, b.code);
-  return { problem: problems[0] ?? null, problems, formatted: CodeRules.formatted(b.sourceType, b.code) };
+  // The body comes from a request: every field is type-checked here, because the code rules read
+  // them as the strings they are declared to be and a `code: 5` would be a TypeError (500).
+  const b = isMap(body) ? body : {};
+  const sourceType = text(b.sourceType, 'sourceType');
+  const subtype = text(b.subtype, 'subtype');
+  const code = text(b.code, 'code');
+  const problems = CodeRules.problems(sourceType, subtype, code);
+  return { problem: problems[0] ?? null, problems, formatted: CodeRules.formatted(sourceType, code) };
+}
+
+const isMap = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/** An optional request field that must be a string: anything else is a 400 naming it. */
+function text(value: unknown, field: string): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') throw new ApiError(400, `${field} must be a string`);
+  return value;
 }

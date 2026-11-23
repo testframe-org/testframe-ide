@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   camelNameProblem,
   environmentNameProblem,
+  environmentNameProblemCode,
   fileNameToVarName,
   isBlank,
   isFrameDirName,
@@ -9,6 +10,7 @@ import {
   normalizeVarName,
   slug,
   sourceNameProblem,
+  sourceNameProblemCode,
   toVarName,
   trim,
   varNameToFileName
@@ -86,6 +88,19 @@ describe('names', () => {
     );
   });
 
+  test('source name problems have a stable code the UI localizes (the message stays the format\'s)', () => {
+    expect(sourceNameProblemCode('products-db')).toBeNull();
+    expect(sourceNameProblemCode('x')).toBe('too-short');
+    expect(sourceNameProblemCode('')).toBe('too-short');
+    expect(sourceNameProblemCode(null)).toBe('too-short');
+    for (const name of ['../x', 'a/b', 'Api', 'a b']) expect(sourceNameProblemCode(name)).toBe('invalid-characters');
+    // the message is derived from the code, so the two can never drift apart
+    expect(sourceNameProblem('x')).toBe('name too short');
+    expect(sourceNameProblem('Api')).toBe(
+      'use lowercase letters, digits, hyphen and underscore (starting with a letter or digit)'
+    );
+  });
+
   test('environment name rules', () => {
     expect(environmentNameProblem('local')).toBeNull();
     expect(environmentNameProblem('hml-1')).toBeNull();
@@ -94,6 +109,14 @@ describe('names', () => {
     expect(environmentNameProblem('a_b')).toContain('invalid environment name');
     expect(environmentNameProblem('-a')).toContain('invalid environment name');
     expect(environmentNameProblem(7)).toContain('invalid environment name');
+  });
+
+  test('environment name problems have a stable code the UI localizes', () => {
+    expect(environmentNameProblemCode('local')).toBeNull();
+    expect(environmentNameProblemCode('hml-1')).toBeNull();
+    expect(environmentNameProblemCode('private')).toBe('reserved');
+    for (const name of ['Local', 'a_b', '-a', '', 7, null, ['a']]) expect(environmentNameProblemCode(name)).toBe('invalid');
+    expect(environmentNameProblem('private')).toBe('the environment name "private" is reserved');
   });
 
   test('frame directory names are kebab-case', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ApiError } from '@/lib/format/errors';
@@ -312,6 +312,76 @@ describe('project store: path sanitization', () => {
       tmp.cleanup();
     }
   });
+
+  test('a symlink planted between the path check and the write is refused too (TOCTOU)', async () => {
+    const tmp = tmpProject();
+    const outside = mkdtempSync(path.join(tmpdir(), 'testframe-outside-'));
+    try {
+      const store = new ProjectStore(tmp.root);
+      const frames = path.join(tmp.testframeDir, 'frames');
+      mkdirSync(path.join(frames, 'main/step-1'), { recursive: true });
+      const link = path.join(frames, 'main/step-1/escape');
+
+      // `escape` does not exist while the paths are validated, so the symlink check has nothing to
+      // see there. A card's content is the last thing the validation loop reads, so this getter is
+      // the window a concurrent writer gets: every path is checked already, nothing is written yet.
+      const planted: ProjectFile = {
+        path: 'main/step-1/escape/pwned.md',
+        get content() {
+          if (!existsSync(link)) symlinkSync(outside, link);
+          return 'p';
+        }
+      };
+      await expect(
+        store.replace('demo', FRAMES_DIR, ['main'], [], [file('main/step-1/a.md', 'a'), planted])
+      ).rejects.toThrow(ApiError);
+      expect(existsSync(path.join(outside, 'pwned.md'))).toBe(false);
+      // the file validated before the link appeared is written, and no .tmp is left behind
+      expect(readFileSync(path.join(frames, 'main/step-1/a.md'), 'utf8')).toBe('a');
+      expect(readdirSync(path.join(frames, 'main/step-1')).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+      tmp.cleanup();
+    }
+  });
+
+  test('Windows and UNC paths are rejected on every platform', async () => {
+    const tmp = tmpProject();
+    try {
+      const store = new ProjectStore(tmp.root);
+      const base = path.join(tmp.root, 'demo');
+      // A drive letter or a UNC share is absolute on Windows and carries a `:` or a `\`, which the
+      // character whitelist refuses everywhere — so neither platform resolves one against the base.
+      const attempts = [
+        'C:\\x\\pwned.md',
+        'C:\\',
+        'C:x.md',
+        'c:/x/pwned.md',
+        '\\\\server\\share\\pwned.md',
+        '\\\\?\\C:\\x\\pwned.md',
+        '\\\\localhost\\c$\\x.md',
+        'main\\step-1\\a.md'
+      ];
+      for (const p of attempts) {
+        expect(() => store.resolveUnder(p, base)).toThrow(ApiError);
+        expect(() => store.resolveRequestPath(p, base)).toThrow(ApiError);
+      }
+
+      // the same rule holds for a project name, a sources layer name and a build cache path
+      for (const p of ['C:\\x', '\\\\server\\share', 'c:/x']) expect(() => store.projectDir(p)).toThrow(ApiError);
+      for (const name of ['sources.C:\\x.yaml', 'sources.a\\b.yaml', '\\\\server\\share\\sources.yaml']) {
+        expect(isSourcesFileName(name)).toBe(false);
+        expect(isSourceLayerFileName(name)).toBe(false);
+      }
+      expect(async () => store.writeBuild('demo', 'runs\\local\\a.json', '{}')).toThrow(ApiError);
+
+      // and a save carrying one writes nothing at all
+      await expect(store.replace('demo', FRAMES_DIR, [], [], [file('main\\step-1\\a.md')])).rejects.toThrow(ApiError);
+      expect(existsSync(path.join(tmp.testframeDir, 'frames'))).toBe(false);
+    } finally {
+      tmp.cleanup();
+    }
+  });
 });
 
 describe('project store: sources*.yaml layers', () => {
@@ -502,6 +572,25 @@ describe('project store: sources*.yaml layers', () => {
       // the write side stays narrow: a bogus name is refused, it is never created at the root
       expect(async () => store.writeSourceLayers('demo', new Map([['sources.other.private.private.yaml', 'x']]), [])).toThrow(ApiError);
       expect(existsSync(path.join(tmp.testframeDir, 'sources.other.private.private.yaml'))).toBe(false);
+      expect(async () => store.writeSourceLayers('demo', new Map([['sources.a.b.yaml', 'x']]), [])).toThrow(ApiError);
+      expect(existsSync(path.join(tmp.testframeDir, 'sources.a.b.yaml'))).toBe(true);
+
+      // The REMOVAL side is as broad as the recognition side: a file that is read and reported can
+      // never be part of a model, so a save is the only way to get rid of it.
+      const result = await store.writeSourceLayers('demo', new Map([['sources.yaml', 'environments: [local]\n']]), [
+        'sources.a.b.yaml',
+        'sources.other.yaml'
+      ]);
+      expect(result.removed).toBe(2);
+      expect(existsSync(path.join(tmp.testframeDir, 'sources.a.b.yaml'))).toBe(false);
+      expect(existsSync(path.join(tmp.testframeDir, 'sources.other.yaml'))).toBe(false);
+      expect(tmp.read('sources.yaml')).toBe('environments: [local]\n');
+
+      // a file the store does not read as a sources layer is never removed by a sources save
+      expect(tmp.read('settings.yaml')).toBe('openapi: {}\n');
+      expect(async () => store.writeSourceLayers('demo', new Map(), ['settings.yaml'])).toThrow(ApiError);
+      expect(async () => store.writeSourceLayers('demo', new Map(), ['../../etc/passwd.yaml'])).toThrow(ApiError);
+      expect(tmp.read('settings.yaml')).toBe('openapi: {}\n');
     } finally {
       tmp.cleanup();
     }

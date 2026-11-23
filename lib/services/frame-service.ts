@@ -71,6 +71,8 @@ export class FrameService {
   /** Replaces frames/{slug(frame.name)}/ with the frame (other frames are untouched); drops the last runs of removed cards. */
   async save(project: string, frame: Frame | null | undefined): Promise<SaveResult> {
     if (!frame || typeof frame.name !== 'string') throw new FormatError('frame is required');
+    const shape = frameShapeProblems(frame);
+    if (shape.length) throw new FormatError(shape);
     const written = FrameCodec.write(frame);
     const result = await this.store.replace(project, FRAMES_DIR, [written.dir], [], written.files);
     const kept = new Set(written.files.filter((f) => f.path.endsWith('.md') && !f.path.endsWith('.private.md')).map((f) => f.path.slice(0, -3)));
@@ -151,6 +153,46 @@ function parseRun(content: string | null): CardRun | null {
   } catch {
     return null;
   }
+}
+
+/** The card fields stored as text, and the ones stored as numbers (`Card`, minus the derived ones). */
+const TEXT_FIELDS = ['varName', 'title', 'sourceType', 'sourceName', 'subtype', 'collection', 'endpoint', 'openapiId', 'code', 'privateData'] as const;
+const NUMBER_FIELDS = ['timeout', 'width', 'height', 'resultHeight'] as const;
+
+const isText = (v: unknown): boolean => v === null || v === undefined || typeof v === 'string';
+const isNumber = (v: unknown): boolean => v === null || v === undefined || typeof v === 'number';
+const isObject = (v: unknown): boolean => v !== null && typeof v === 'object';
+
+/**
+ * Type-checks a frame that came from a request body: the codec reads every field as the text or
+ * number it is declared to be, so a card holding `code: 5` would be a TypeError (answered 500)
+ * instead of a 400 naming the field.
+ */
+function frameShapeProblems(frame: Frame): string[] {
+  if (frame.steps !== null && frame.steps !== undefined && !Array.isArray(frame.steps)) return ['steps must be a list of steps'];
+  const problems: string[] = [];
+  (frame.steps ?? []).forEach((step, s) => {
+    const where = `step ${s + 1}`;
+    if (!isObject(step)) {
+      problems.push(`${where}: a step must be an object`);
+      return;
+    }
+    if (step.cards !== null && step.cards !== undefined && !Array.isArray(step.cards)) {
+      problems.push(`${where}: cards must be a list of cards`);
+      return;
+    }
+    (step.cards ?? []).forEach((card, c) => {
+      const which = `${where}, card ${c + 1}`;
+      if (!isObject(card)) {
+        problems.push(`${which}: a card must be an object`);
+        return;
+      }
+      const fields = card as unknown as Record<string, unknown>;
+      for (const field of TEXT_FIELDS) if (!isText(fields[field])) problems.push(`${which}: ${field} must be a string`);
+      for (const field of NUMBER_FIELDS) if (!isNumber(fields[field])) problems.push(`${which}: ${field} must be a number`);
+    });
+  });
+  return problems;
 }
 
 /** An openapi card whose operation is not in the source's cached spec (null when fine or unknown). */

@@ -9,10 +9,11 @@ import type { ProjectFile } from '../format/types';
 // ProjectFileStore): such a path goes through resolveRequestPath, which refuses `..` outright and
 // then delegates to resolveUnder, the containment primitive (relative paths only, a character
 // whitelist and a length cap, `..` stripped rather than followed, the result kept under its base
-// directory, and no symlink anywhere below the projects root). Only `.md` files are written under
-// frames/, the sources*.yaml layers only at the testframe/ root with their exact file-name
-// grammar, the build cache only as `.json` files under testframe/.testframebuild/, and a replace
-// scope can never be the frames/ root.
+// directory, and no symlink anywhere below the projects root — checked again immediately before
+// each write, so a link planted while a save was being validated is refused too). Only `.md` files
+// are written under frames/, the sources*.yaml layers only at the testframe/ root with their exact
+// file-name grammar, the build cache only as `.json` files under testframe/.testframebuild/, and a
+// replace scope can never be the frames/ root.
 
 export const TESTFRAME_DIR = 'testframe';
 export const FRAMES_DIR = 'testframe/frames';
@@ -69,6 +70,29 @@ const bad = (message: string) => new ApiError(400, message);
 /** A rejected name inside an error message, truncated: an oversized value is never echoed back. */
 const show = (value: string): string => (value.length > 120 ? `${value.slice(0, 120)}...` : value);
 
+/**
+ * Rejects a target reached through a symlink: every component of `target` below the projects
+ * `root` must be a real entry, or a link planted inside a project would carry a write outside it
+ * (the plugin reads with NOFOLLOW_LINKS; this is the write side of the same rule). Called while a
+ * request path is resolved and again immediately before a write ({@link writeAtomic}).
+ */
+function assertNoSymlinkUnder(root: string, target: string): void {
+  const relative = path.relative(root, target);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return;
+  let current = root;
+  for (const segment of relative.split(path.sep)) {
+    if (segment === '') continue;
+    current = path.join(current, segment);
+    let stats;
+    try {
+      stats = lstatSync(current);
+    } catch {
+      return; // nothing on disk yet, so nothing to follow
+    }
+    if (stats.isSymbolicLink()) throw bad(`Symbolic links are not allowed in a project path: ${show(relative)}`);
+  }
+}
+
 export class ProjectStore {
   readonly root: string;
 
@@ -105,30 +129,8 @@ export class ProjectStore {
     if (!SAFE_PATH.test(cleaned)) throw bad(`Invalid character in path: ${show(trimmed)}`);
     const resolved = path.resolve(baseDir, cleaned);
     if (resolved !== baseDir && !resolved.startsWith(baseDir + path.sep)) throw bad('Path outside the projects directory');
-    this.assertNoSymlink(resolved);
+    assertNoSymlinkUnder(this.root, resolved);
     return resolved;
-  }
-
-  /**
-   * Rejects a target reached through a symlink: every component of `target` below the projects
-   * root must be a real entry, or a link planted inside a project would carry a write outside it
-   * (the plugin reads with NOFOLLOW_LINKS; this is the write side of the same rule).
-   */
-  private assertNoSymlink(target: string): void {
-    const relative = path.relative(this.root, target);
-    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return;
-    let current = this.root;
-    for (const segment of relative.split(path.sep)) {
-      if (segment === '') continue;
-      current = path.join(current, segment);
-      let stats;
-      try {
-        stats = lstatSync(current);
-      } catch {
-        return; // nothing on disk yet, so nothing to follow
-      }
-      if (stats.isSymbolicLink()) throw bad(`Symbolic links are not allowed in a project path: ${show(relative)}`);
-    }
   }
 
   /** {root}/{project}: never the projects root itself. */
@@ -179,7 +181,7 @@ export class ProjectStore {
       stalePaths.push(stalePath);
     }
 
-    for (const [target, content] of targets) await writeAtomic(target, content);
+    for (const [target, content] of targets) await writeAtomic(target, content, this.root);
     let removed = 0;
     for (const scopeDir of scopeDirs) removed += await prune(scopeDir, new Set(targets.keys()));
     for (const stale of stalePaths) {
@@ -232,19 +234,25 @@ export class ProjectStore {
     return { layers, errors };
   }
 
-  /** Writes the given layer files and deletes the `remove` ones (names validated first). */
+  /**
+   * Writes the given layer files and deletes the `remove` ones. Writing accepts only the four
+   * layer names; removing accepts every name the store READS as a sources file, so a
+   * recognized-but-bogus one (`sources.a.b.yaml`) is dropped by a save instead of staying on disk
+   * forever — it can never be part of a model, so a save is the only way to get rid of it, and it
+   * can never be written back.
+   */
   async writeSourceLayers(project: string, files: Map<string, string>, remove: string[]): Promise<SaveResult> {
     const dir = this.testframeDir(project);
-    const check = (name: string) => {
-      if (!isSourceLayerFileName(name)) throw bad(`Not a sources layer file name: ${show(name)}`);
+    const atRoot = (name: string, accepted: (n: string) => boolean, problem: string) => {
+      if (!accepted(name)) throw bad(`${problem}: ${show(name)}`);
       return this.resolveRequestPath(name, dir);
     };
     const targets = [...files].map(([name, content]) => {
       checkSize(name, content);
-      return [check(name), content] as const;
+      return [atRoot(name, isSourceLayerFileName, 'Not a sources layer file name'), content] as const;
     });
-    const removals = remove.map(check);
-    for (const [target, content] of targets) await writeAtomic(target, content);
+    const removals = remove.map((name) => atRoot(name, isSourcesFileName, 'Not a sources file name'));
+    for (const [target, content] of targets) await writeAtomic(target, content, this.root);
     let removed = 0;
     for (const p of removals) if (!files.has(path.basename(p)) && (await deleteIfExists(p))) removed++;
     await this.ensureGitignore(project);
@@ -272,7 +280,7 @@ export class ProjectStore {
   }
 
   async writeBuild(project: string, relative: string, content: string): Promise<void> {
-    await writeAtomic(this.buildPath(project, relative, true), content);
+    await writeAtomic(this.buildPath(project, relative, true), content, this.root);
     await this.ensureGitignore(project);
   }
 
@@ -308,7 +316,7 @@ export class ProjectStore {
     const missing = GITIGNORE_LINES.filter((l) => !lines.has(l));
     if (!missing.length) return;
     const prefix = current ? (current.endsWith('\n') ? current : `${current}\n`) : `${GITIGNORE_HEADER}\n`;
-    await writeAtomic(file, prefix + missing.map((l) => `${l}\n`).join(''));
+    await writeAtomic(file, prefix + missing.map((l) => `${l}\n`).join(''), this.root);
   }
 
   // ------------------------------------------------------------------ projects
@@ -381,15 +389,38 @@ function checkSize(rel: string, content: string): void {
   }
 }
 
-/** Reads a project file, or returns null when it is over {@link MAX_FILE_BYTES}. */
+/**
+ * Reads a project file, or returns null when it is over {@link MAX_FILE_BYTES}. The size and the
+ * bytes come from one open handle and the read is bounded by the cap, so a file that grows in
+ * between is never read past it (a `stat` followed by a `readFile` reads whatever the file became).
+ */
 async function readCapped(file: string): Promise<string | null> {
-  const { size } = await fs.stat(file);
-  return size > MAX_FILE_BYTES ? null : fs.readFile(file, 'utf8');
+  const handle = await fs.open(file, 'r');
+  try {
+    const { size } = await handle.stat();
+    if (size > MAX_FILE_BYTES) return null;
+    const buffer = Buffer.alloc(size);
+    let offset = 0;
+    while (offset < size) {
+      const { bytesRead } = await handle.read(buffer, offset, size - offset, offset);
+      if (bytesRead === 0) break; // shortened while being read: keep what was read
+      offset += bytesRead;
+    }
+    return buffer.subarray(0, offset).toString('utf8');
+  } finally {
+    await handle.close();
+  }
 }
 
-/** Writes through a uniquely named temporary file (two concurrent saves never share one), then renames. */
-async function writeAtomic(target: string, content: string): Promise<void> {
+/**
+ * Writes through a uniquely named temporary file (two concurrent saves never share one), then
+ * renames. The symlink check runs again here, once the directories exist and immediately before
+ * the temporary file is created: the one in {@link ProjectStore.resolveUnder} ran while the save
+ * was still being validated, which leaves a window a concurrent writer can plant a link in.
+ */
+async function writeAtomic(target: string, content: string, root: string): Promise<void> {
   await fs.mkdir(path.dirname(target), { recursive: true });
+  assertNoSymlinkUnder(root, target);
   const tmp = `${target}.${randomUUID()}.tmp`;
   try {
     await fs.writeFile(tmp, content, { encoding: 'utf8', flag: 'wx' });

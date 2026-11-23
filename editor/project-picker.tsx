@@ -82,7 +82,7 @@ export function ProjectPicker({ onOpen }: ProjectPickerProps) {
               <p className="text-xs text-slate-500">{t('pickProjectHint')}</p>
             </div>
           </div>
-          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 text-[11px] font-semibold" role="group" aria-label="Language">
+          <div className="flex items-center bg-slate-100 rounded-lg p-0.5 text-[11px] font-semibold" role="group" aria-label={t('languageLabel')}>
             {(['en', 'pt-BR'] as const).map((l) => (
               <button
                 key={l}

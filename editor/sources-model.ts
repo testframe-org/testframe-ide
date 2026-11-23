@@ -108,20 +108,12 @@ export function removeSource(model: SourcesModel, type: string, name: string): S
   return { ...model, layers: { base: drop(model.layers.base), private: drop(model.layers.private), env } };
 }
 
-/** Renames a source in sources.yaml and every layer that mentions it. */
-export function renameSource(model: SourcesModel, type: string, from: string, to: string): SourcesModel {
-  if (from === to || !to) return model;
-  const rename = (layer: LayerData): LayerData => {
-    const sources = layer[type];
-    if (!sources || !(from in sources)) return layer;
-    const next: Record<string, SourceFields> = {};
-    for (const [key, value] of Object.entries(sources)) next[key === from ? to : key] = value;
-    return { ...layer, [type]: next };
-  };
-  const env: SourcesModel['layers']['env'] = {};
-  for (const [key, layers] of Object.entries(model.layers.env)) env[key] = { public: rename(layers.public), private: rename(layers.private) };
-  return { ...model, layers: { base: rename(model.layers.base), private: rename(model.layers.private), env } };
-}
+/**
+ * Renames a source in sources.yaml and every layer that mentions it. Shared with the server
+ * (lib/sources/source-rename.ts): a save applies the same renames to the model on disk, so the
+ * private values stored under the old name answer the markers the editor sends under the new one.
+ */
+export { renameSource } from '@/lib/sources/source-rename';
 
 // ------------------------------------------------------------------ fields
 

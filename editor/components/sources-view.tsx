@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { AlertCircle, Check, Globe, Lock, Plus, RefreshCw, Save, Trash2, Unlock, Loader2 } from 'lucide-react';
-import { environmentNameProblem, sourceNameProblem } from '@/lib/format/names';
+import { environmentNameProblemCode, sourceNameProblemCode, type EnvironmentNameProblem, type SourceNameProblem } from '@/lib/format/names';
 import type { SourcesModel } from '@/lib/sources/sources-yaml';
 import { namedSourceTypes } from '../catalog';
-import { useI18n } from '../i18n';
+import { useI18n, type TKey } from '../i18n';
 import {
   ALL_SCOPE,
   addEnvironment,
@@ -51,6 +51,8 @@ interface SourcesViewProps {
   /** The environment the editor currently runs in (the default scope, and the resolution shown). */
   currentEnvironment: string | null;
   onChange: (model: SourcesModel) => void;
+  /** A source was renamed: the save carries its stored private values over to the new name. */
+  onRename: (type: string, from: string, to: string) => void;
   onSave: () => void;
   onReload: () => void;
 }
@@ -83,6 +85,32 @@ function fieldInputProps(state: FieldState, placeholder: string, storedPlacehold
   };
 }
 
+/** A localized message: an i18n key and its variables. */
+interface Shown {
+  key: TKey;
+  vars?: Record<string, string>;
+}
+
+// The naming rules live in lib/format/names (the format's own messages, matched by the plugin's
+// decoders); the UI shows them through i18n, keyed by the rule's code. A Record, so a new code
+// without a localized message fails `bun run typecheck`.
+const SOURCE_NAME_KEY: Record<SourceNameProblem, TKey> = {
+  'too-short': 'sourceNameTooShort',
+  'invalid-characters': 'sourceNameInvalidCharacters'
+};
+
+const ENVIRONMENT_NAME_KEY: Record<EnvironmentNameProblem, TKey> = {
+  invalid: 'environmentNameInvalid',
+  reserved: 'environmentNameReserved'
+};
+
+/** Why the typed environment name cannot be added, or null when it can. */
+function environmentProblem(env: string, declared: string[]): Shown | null {
+  if (declared.includes(env)) return { key: 'environmentNameDuplicate', vars: { env } };
+  const code = environmentNameProblemCode(env);
+  return code === null ? null : { key: ENVIRONMENT_NAME_KEY[code] };
+}
+
 /** The private/shared toggle of one field: which layer of the current scope holds the value. */
 function LayerToggle({ isPrivate, onToggle, title }: { isPrivate: boolean; onToggle: () => void; title: string }) {
   return (
@@ -111,6 +139,7 @@ export function SourcesView({
   saving,
   currentEnvironment,
   onChange,
+  onRename,
   onSave,
   onReload
 }: SourcesViewProps) {
@@ -119,6 +148,7 @@ export function SourcesView({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [nameDraft, setNameDraft] = useState('');
   const [newEnv, setNewEnv] = useState('');
+  const [envProblem, setEnvProblem] = useState<Shown | null>(null);
   const [newHeader, setNewHeader] = useState({ name: '', value: '' });
 
   const scopeEnv = scope.kind === 'env' ? scope.env : currentEnvironment;
@@ -148,17 +178,19 @@ export function SourcesView({
   const commitName = () => {
     if (!selection) return;
     const next = nameDraft.trim();
-    if (!next || next === selection.name || sourceNameProblem(next)) {
+    if (!next || next === selection.name || sourceNameProblemCode(next)) {
       setNameDraft(selection.name);
       return;
     }
     onChange(renameSource(model, selection.type, selection.name, next));
+    onRename(selection.type, selection.name, next);
     setSelection({ type: selection.type, name: next });
   };
 
   const selected = selection && sourceNames(model, selection.type).includes(selection.name) ? selection : null;
   const url = selected ? baseUrlState(model, scope, scopeEnv, selected.type, selected.name) : null;
   const headers = selected && selected.type === 'openapi' ? headerNames(model, scopeEnv, selected.type, selected.name) : [];
+  const nameProblem = selected && nameDraft !== selected.name ? sourceNameProblemCode(nameDraft) : null;
 
   return (
     <div className="flex-1 flex overflow-hidden bg-white">
@@ -222,17 +254,23 @@ export function SourcesView({
             onSubmit={(e) => {
               e.preventDefault();
               const env = newEnv.trim();
-              if (!env || model.environments.includes(env) || environmentNameProblem(env)) return;
+              const problem = env ? environmentProblem(env, model.environments) : null;
+              setEnvProblem(problem);
+              if (!env || problem) return;
               onChange(addEnvironment(model, env));
               setNewEnv('');
             }}
           >
             <input
               value={newEnv}
-              onChange={(e) => setNewEnv(e.target.value)}
+              onChange={(e) => {
+                setNewEnv(e.target.value);
+                setEnvProblem(null);
+              }}
               placeholder={t('environmentPlaceholder')}
               aria-label={t('environmentsLabel')}
-              className={`flex-1 min-w-0 ${inputCls}`}
+              aria-invalid={envProblem ? true : undefined}
+              className={`flex-1 min-w-0 ${inputCls} ${envProblem ? 'border-rose-400 bg-rose-50/40' : ''}`}
             />
             <button
               type="submit"
@@ -242,7 +280,13 @@ export function SourcesView({
               {t('addEnvironment')}
             </button>
           </form>
-          <p className="text-[10px] text-slate-400">{t('environmentsHint')}</p>
+          {envProblem ? (
+            <p className="text-[10px] text-rose-600" role="alert">
+              {t(envProblem.key, envProblem.vars)}
+            </p>
+          ) : (
+            <p className="text-[10px] text-slate-400">{t('environmentsHint')}</p>
+          )}
         </div>
 
         {/* Sources, grouped by type */}
@@ -332,8 +376,10 @@ export function SourcesView({
                 }}
                 className="text-xs font-mono font-semibold text-slate-800 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 outline-none py-0.5 w-56"
               />
-              {nameDraft !== selected.name && sourceNameProblem(nameDraft) && (
-                <span className="text-[10.5px] text-rose-600 shrink-0">{sourceNameProblem(nameDraft)}</span>
+              {nameProblem && (
+                <span className="text-[10.5px] text-rose-600 shrink-0" role="alert">
+                  {t(SOURCE_NAME_KEY[nameProblem])}
+                </span>
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">

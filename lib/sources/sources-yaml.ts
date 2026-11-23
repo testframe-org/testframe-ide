@@ -2,6 +2,7 @@ import YAML from 'yaml';
 import { NAMED_SOURCE_TYPES } from '../format/catalog';
 import { environmentNameProblem, sourceNameProblem } from '../format/names';
 import { PRIVATE_MARKER } from './private-marker';
+import type { SourceRename } from './source-rename';
 
 export { PRIVATE_MARKER } from './private-marker';
 
@@ -281,6 +282,9 @@ export function validateModel(input: unknown): { model: SourcesModel; errors: st
   const model = emptyModel();
   if (!isMap(input)) return { model, errors: ['sources: expected {environments, layers}'] };
   model.environments = validateEnvironments(input.environments, errors);
+  // A missing or non-map section is a problem, not an empty model: reading it as {} would rewrite
+  // sources.yaml without a single source and delete every layer file the model does not mention.
+  if (!isMap(input.layers)) errors.push('sources: layers: expected a map (base, private, env)');
   const layers = isMap(input.layers) ? input.layers : {};
   if (isMap(layers.base) && 'environments' in layers.base) {
     errors.push(`${BASE_FILE}: environments: send it as the top-level "environments" field`);
@@ -288,10 +292,17 @@ export function validateModel(input: unknown): { model: SourcesModel; errors: st
   model.layers.base = validateLayer(BASE_FILE, layers.base ?? {}, true, errors);
   model.layers.private = validateLayer(PRIVATE_FILE, layers.private ?? {}, false, errors);
   checkDeclared(PRIVATE_FILE, model.layers.private, model.layers.base, errors);
+  if (layers.env !== null && layers.env !== undefined && !isMap(layers.env)) {
+    errors.push('sources: layers.env: expected a map of environment names');
+  }
   const envs = isMap(layers.env) ? layers.env : {};
   for (const [env, value] of Object.entries(envs)) {
     if (!model.environments.includes(env)) {
       errors.push(`${envFile(env, false)}: environment "${env}" is not in the environments list`);
+      continue;
+    }
+    if (value !== null && value !== undefined && !isMap(value)) {
+      errors.push(`sources: layers.env.${env}: expected a map (public, private)`);
       continue;
     }
     const v = isMap(value) ? value : {};
@@ -303,6 +314,21 @@ export function validateModel(input: unknown): { model: SourcesModel; errors: st
   }
   for (const env of model.environments) model.layers.env[env] ??= { public: {}, private: {} };
   return { model, errors };
+}
+
+// ------------------------------------------------------------------ renaming a source
+
+/** The `renames` of a save body; an entry that is not `{type, from, to}` of strings is ignored. */
+export function readRenames(input: unknown): SourceRename[] {
+  const value = isMap(input) ? input.renames : undefined;
+  if (!Array.isArray(value)) return [];
+  const out: SourceRename[] = [];
+  for (const entry of value) {
+    if (!isMap(entry)) continue;
+    const { type, from, to } = entry;
+    if (typeof type === 'string' && typeof from === 'string' && typeof to === 'string') out.push({ type, from, to });
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ canonical writing
@@ -596,7 +622,9 @@ function unmaskLayer(file: string, layer: LayerData, stored: LayerData, errors: 
  * Resolves the markers of a model sent by the editor against the model on disk: a marker keeps
  * the value stored at the same place (same private layer file, type, source, field; header names
  * ignore case). A marker with nothing stored there, or in a shared layer, is an error — a stored
- * secret is never copied to another layer or source.
+ * secret is never copied to another layer or source. Pass the disk model through `renamedStored`
+ * (lib/sources/source-rename.ts) first when the editor renamed sources, so a rename carries its
+ * values over.
  */
 export function unmaskModel(model: SourcesModel, stored: SourcesModel): { model: SourcesModel; errors: string[] } {
   const errors: string[] = [];
